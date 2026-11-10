@@ -2,3 +2,4 @@
 // argument as one file to run, which loads this index. It loads every suite.
 import('./guard-tests.mjs');
 import('./doctor-tests.mjs');
+import('./breakdown-tests.mjs');

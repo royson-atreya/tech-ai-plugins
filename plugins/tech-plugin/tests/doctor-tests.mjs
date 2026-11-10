@@ -12,6 +12,9 @@ import { spawnSync } from 'node:child_process';
 import { detectLanguages, effortWarning, installCommand, installedPlugins, jvmPlugin } from '../scripts/lib/detect.mjs';
 import { PLUGIN } from './fixture.mjs';
 
+const VERSION = JSON.parse(fs.readFileSync(path.join(PLUGIN, '.claude-plugin/plugin.json'), 'utf8')).version;
+const V = VERSION.replace(/\./g, '\\.');
+
 const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tp-doctor-')));
 after(() => fs.rmSync(T, { recursive: true, force: true }));
 
@@ -133,16 +136,16 @@ describe('session banner', () => {
   test('repo with sdlc-docs', () => {
     const r = banner(JSON.stringify({ cwd: path.join(repo, 'sdlc-docs') }));
     assert.equal(r.status, 0);
-    assert.deepEqual(JSON.parse(r.stdout), { systemMessage: 'tech-plugin v0.1.0 | repo brepo | sdlc-docs: found | guard on' });
+    assert.deepEqual(JSON.parse(r.stdout), { systemMessage: `tech-plugin v${VERSION} | repo brepo | sdlc-docs: found | guard on` });
   });
   test('no repo, no sdlc-docs', () => {
     const r = banner(JSON.stringify({ cwd: norepo }));
-    assert.equal(JSON.parse(r.stdout).systemMessage, 'tech-plugin v0.1.0 | repo none | sdlc-docs: not set up | guard on');
+    assert.equal(JSON.parse(r.stdout).systemMessage, `tech-plugin v${VERSION} | repo none | sdlc-docs: not set up | guard on`);
   });
   test('broken input still prints a line and exits 0', () => {
     const r = banner('{not json');
     assert.equal(r.status, 0);
-    assert.match(JSON.parse(r.stdout).systemMessage, /^tech-plugin v0\.1\.0 \| repo .* \| guard on$/);
+    assert.match(JSON.parse(r.stdout).systemMessage, new RegExp(`^tech-plugin v${V} \\| repo .* \\| guard on$`));
   });
   test('missing plugin.json still prints a line', () => {
     const r = banner('{}', { CLAUDE_PLUGIN_ROOT: path.join(T, 'nowhere') });

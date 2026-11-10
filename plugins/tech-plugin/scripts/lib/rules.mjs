@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Block, checkDeadline } from './core.mjs';
 import { loadDefaults, loadProject, merge } from './config.mjs';
+import { compileSecrets, globToRegex, nameIsSecret } from './secretnames.mjs';
 import {
   cmpForm, currentBranch, disp, findRepo, fold, homeDir, resolvePath, samePath, under, IS_WIN,
 } from './paths.mjs';
@@ -61,9 +62,7 @@ function cfgFor(ctx, repo) {
     if (error) throw new Block('config', `${error} (repo ${path.basename(r)}); fix that file by hand`);
     projects.push(cfg);
   }
-  const m = merge(ctx.defaults, projects);
-  m.secretRes = m.secretPatterns.map(globToRegex);
-  m.secretExc = new Set(m.secretExceptions.map((x) => x.toLowerCase()));
+  const m = compileSecrets(merge(ctx.defaults, projects));
   m.secretTokens = secretTokens(m.secretPatterns);
   m.branchRes = m.protectedBranches.map((b) => globToRegex(b, true));
   ctx.cfgCache.set(key, m);
@@ -72,26 +71,7 @@ function cfgFor(ctx, repo) {
 
 // ------------------------------------------------------------------ globs
 
-// Basename glob -> case-insensitive RegExp. `anyChar` lets * cross "/" (branch names).
-export function globToRegex(g, anyChar = false) {
-  const star = anyChar ? '.*' : '[^/]*';
-  let re = '^';
-  for (let i = 0; i < g.length; i++) {
-    const c = g[i];
-    if (c === '*') re += star;
-    else if (c === '?') re += anyChar ? '.' : '[^/]';
-    else if (c === '[') {
-      const j = g.indexOf(']', i + 2);
-      if (j > i) {
-        let cls = g.slice(i + 1, j).replace(/\\/g, '\\\\');
-        if (cls[0] === '!') cls = '^' + cls.slice(1);
-        re += `[${cls}]`;
-        i = j;
-      } else re += '\\[';
-    } else re += c.replace(/[.+^${}()|\\/\]]/g, '\\$&');
-  }
-  return new RegExp(re + '$', 'i');
-}
+export { globToRegex };
 
 // Literal chunks of each secret pattern (".env", ".jks", "firebase-"...), used to
 // tell whether a search pattern is aimed at secret files.
@@ -112,11 +92,7 @@ export function baseName(p) {
 
 // true if the file NAME is a secret (.env, keystores, Firebase/Google files...).
 export function isSecretName(name, ctx, repo = null) {
-  const b = baseName(name).toLowerCase();
-  if (!b) return false;
-  const cfg = ctx.cfgFor(repo);
-  if (cfg.secretExc.has(b)) return false;
-  return cfg.secretRes.some((re) => re.test(b));
+  return nameIsSecret(ctx.cfgFor(repo), baseName(name));
 }
 
 // Secret check for a resolved absolute path (also applies the path's own repo config).
