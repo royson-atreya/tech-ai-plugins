@@ -27,7 +27,7 @@ import { readPython } from '../lib/readers/python.mjs';
 import { readSpring } from '../lib/readers/spring.mjs';
 import { readWeb } from '../lib/readers/web.mjs';
 import { commitOf, docsDir, fail, parseArgs, readJson, real, writeDocs } from './common.mjs';
-import { baseRegex, codeTree, factsRel, loadOverrides, loadSystemYaml, ownHosts } from './load.mjs';
+import { READERS_VERSION, baseRegex, codeTree, factsRel, loadOverrides, loadSystemYaml, ownHosts } from './load.mjs';
 import { findHome, loadState, saveState } from './state.mjs';
 
 const NODE_BACKENDS = ['Express', 'NestJS', 'Fastify', 'Koa', 'hapi'];
@@ -56,8 +56,8 @@ export function mapRepo(repoArg, { home = null, graph = true, force = false } = 
   const commit = commitOf(repo);
   const old = readJson(path.join(docsDir(repo), factsRel(name)));
   const graphNowAvailable = graph && old && old.graph && old.graph.status === 'missing' && findGraphify();
-  if (!force && old && old.commit === commit && old.tree === tree && old.schema === 1 && !graphNowAvailable) {
-    recordState(home, name, { commit, tree });
+  if (!force && old && old.commit === commit && old.tree === tree && old.schema === 1 && old.readers === READERS_VERSION && !graphNowAvailable) {
+    recordState(home, name, { commit, tree, readers: READERS_VERSION });
     return { upToDate: true, line: `${name}: already mapped at ${commit ? commit.slice(0, 7) : 'no commit'}; no code change` };
   }
 
@@ -151,6 +151,14 @@ export function mapRepo(repoArg, { home = null, graph = true, force = false } = 
       if (!graphData) facts.notes.push('no code graph (graphify not available): the generic reader found only route-like registrations');
     }
     const screenFiles = new Map(facts.screens.filter((s) => s.file && !s.partial).map((s) => [s.file, s.id]));
+    // a page's own script (loaded by exactly one page) counts as that page;
+    // a script several pages load is credited to none of them
+    const loadedBy = new Map();
+    for (const s of facts.screens) for (const js of s.scripts || []) {
+      if (!loadedBy.has(js)) loadedBy.set(js, new Set());
+      loadedBy.get(js).add(s.partial ? '*partial*' : s.id);
+    }
+    for (const [js, by] of loadedBy) if (by.size === 1 && !by.has('*partial*') && !screenFiles.has(js)) screenFiles.set(js, [...by][0]);
     const { calls } = readCalls({ files: appFiles, src, baseRe, skip, screenFiles });
     if (laravel) {
       for (const c of calls) {
@@ -170,6 +178,7 @@ export function mapRepo(repoArg, { home = null, graph = true, force = false } = 
   }
   const facts = {
     schema: 1,
+    readers: READERS_VERSION,
     repo: name,
     commit,
     tree,
@@ -180,7 +189,7 @@ export function mapRepo(repoArg, { home = null, graph = true, force = false } = 
   };
   writeDocs(repo, factsRel(name), JSON.stringify(facts, null, 1) + '\n');
   writeDocs(repo, path.join('_map', name, 'facts.md'), factsMd(facts));
-  recordState(home, name, { commit, tree });
+  recordState(home, name, { commit, tree, readers: READERS_VERSION });
   return { upToDate: false, line: summaryLine(facts), facts };
 }
 
@@ -213,7 +222,7 @@ export function summaryLine(facts) {
     if (c.calls) bits.push(`${c.calls} API calls${c.unresolvedCalls ? ` (${c.unresolvedCalls} unresolved)` : ''}`);
     if (c.tables) bits.push(`${c.tables} tables`);
     if (c.groups) bits.push(`${c.groups} code groups`);
-    const ext = a.externals.systems.map((s) => s.system.split(' ')[0]);
+    const ext = [...new Set(a.externals.systems.map((s) => s.system.split(' ')[0]))];
     if (ext.length) bits.push(`services: ${ext.slice(0, 5).join(', ')}${ext.length > 5 ? '…' : ''}`);
     return `${a.id} [${a.readers.join('+')}]: ${bits.join(', ') || 'nothing found'}`;
   });

@@ -533,7 +533,10 @@ function readBlade(files, root, src, handlers, routes) {
     const id = f.slice(vroot.length, -'.blade.php'.length).replace(/\//g, '.');
     const s = src(f);
     const links = [];
+    const scripts = [];
     if (s) {
+      // page JS: <script src="{{ asset('js/x.js') }}"> or src="/js/x.js"
+      for (const m of s.text.matchAll(/<script\b[^>]*\bsrc\s*=\s*["'](?:\{\{\s*(?:asset|url|mix|secure_asset)\(\s*['"]\/?([^'"]+?)['"][^}]*\}\}|\/([^"'{}]+?))(?:\?[^"']*)?["']/gi)) scripts.push(J(root, 'public', (m[1] || m[2]).replace(/^public\//, '')));
       for (const m of s.text.matchAll(/route\(\s*['"]([\w.:-]+)['"]/g)) links.push({ kind: 'route-name', target: m[1] });
       for (const m of s.text.matchAll(/(?:url\(\s*|href=|action=)['"](\/[\w\/{}.-]*)['"]/g)) links.push({ kind: 'url', target: m[1] });
     }
@@ -541,7 +544,7 @@ function readBlade(files, root, src, handlers, routes) {
     const viaRoutes = routes.filter((r) => !r.shadowed && ((r.view && r.view === id) || (r.controller && by.includes(r.handler))));
     const getRoute = viaRoutes.find((r) => r.method === 'GET') || viaRoutes[0];
     const partial = /(^|\.)(layouts?|partials?|components?|includes?|emails?|mail|vendor|errors|pdf)(\.|$)/i.test(id) || /(^|\.)_[^.]*$/.test(id);
-    screens.push({ id, name: id, file: f, cite: `${f}:1`, path: getRoute ? getRoute.uri : null, kind: 'blade', renderedBy: by, links: uniqBy(links), partial, class: 'Verified' });
+    screens.push({ id, name: id, file: f, cite: `${f}:1`, path: getRoute ? getRoute.uri : null, kind: 'blade', renderedBy: by, links: uniqBy(links), scripts: [...new Set(scripts)], partial, class: 'Verified' });
   }
   return screens;
 }

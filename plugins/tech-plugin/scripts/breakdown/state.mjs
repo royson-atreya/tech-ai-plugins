@@ -12,7 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DOCS, commitOf, fail, fingerprint, parseArgs, readJson, real, repoRoot, writeDocs } from './common.mjs';
-import { codeTree } from './load.mjs';
+import { READERS_VERSION, codeTree } from './load.mjs';
 
 export const STATE_REL = path.join('_state', 'breakdown.json');
 
@@ -66,7 +66,7 @@ export function findHome(cwd) {
   return null;
 }
 
-const stampKey = (m) => (m ? `${m.commit || 'none'}:${m.tree}` : null);
+const stampKey = (m) => (m ? `${m.commit || 'none'}:${m.tree}:r${m.readers || 1}` : null);
 const same = (a, b) => JSON.stringify(a || {}) === JSON.stringify(b || {});
 
 // Where the run stands and what to do next. Cheap: reads the progress file,
@@ -85,8 +85,9 @@ export function status(cwd) {
     const fp = exists ? fingerprint(p) : null;
     const tree = exists ? codeTree(p).tree : null;
     const changed = !exists || (r.detectedCommit !== undefined && r.fingerprint !== fp);
-    const codeChanged = !exists || !r.mapped || r.mapped.commit !== commit || r.mapped.tree !== tree;
-    return { name: r.name, path: p, role: r.role || null, exists, detectedCommit: r.detectedCommit ?? null, currentCommit: commit, changed, codeChanged, detected: r.detectedCommit !== undefined, mapped: !!r.mapped };
+    const codeChanged = !exists || !r.mapped || r.mapped.commit !== commit || r.mapped.tree !== tree || (r.mapped.readers || 1) !== READERS_VERSION;
+    const readersOutdated = !!r.mapped && (r.mapped.readers || 1) !== READERS_VERSION;
+    return { name: r.name, path: p, role: r.role || null, exists, readersOutdated, detectedCommit: r.detectedCommit ?? null, currentCommit: commit, changed, codeChanged, detected: r.detectedCommit !== undefined, mapped: !!r.mapped };
   });
   const S = st.stages || {};
   const stage = (n) => S[String(n)] || {};
@@ -98,7 +99,7 @@ export function status(cwd) {
   else if (repos.some((r) => !r.exists)) [next, message] = [1, `Missing repo folder(s): ${names(repos.filter((r) => !r.exists))}.`];
   else if (stage(2).status !== 'done') [next, message] = [2, stage(2).status === 'awaiting-confirmation' ? 'Stage 2 is waiting for your confirmation of the profile.' : 'Stage 2 (learn each repo) is not finished.'];
   else if (repos.some((r) => r.changed || !r.detected)) [next, message] = [2, `Manifests changed since the profile was confirmed in: ${names(repos.filter((r) => r.changed || !r.detected))}.`];
-  else if (repos.some((r) => r.codeChanged)) [next, message] = [3, repos.every((r) => !r.mapped) ? 'Stage 3 (read the code) has not run yet.' : `Code changed since stage 3 in: ${names(repos.filter((r) => r.codeChanged))}.`];
+  else if (repos.some((r) => r.codeChanged)) [next, message] = [3, repos.every((r) => !r.mapped) ? 'Stage 3 (read the code) has not run yet.' : repos.some((r) => r.readersOutdated) ? `tech-plugin's code readers were improved since stage 3 ran: reading again ${names(repos.filter((r) => r.codeChanged))}.` : `Code changed since stage 3 in: ${names(repos.filter((r) => r.codeChanged))}.`];
   else if (stage(4).status !== 'done' || !same(stage(4).inputs, stamps)) [next, message] = [4, 'Stage 4 (link the apps) needs to run.'];
   else if (stage(5).status !== 'done') [next, message] = [5, stage(5).status === 'awaiting-approval' ? 'Stage 5 is waiting for your approval of the module list.' : 'Stage 5 (propose modules) has not run yet.'];
   else if (!same(stage(5).inputs, stamps)) [next, message] = [5, 'Code changed since the modules were approved: checking whether any route or screen moved.'];

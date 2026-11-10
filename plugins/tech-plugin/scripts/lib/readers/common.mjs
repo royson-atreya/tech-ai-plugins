@@ -247,8 +247,10 @@ export function markShadowed(routes) {
 
 const TEST_RE = /(^|\/)(tests?|__tests__|spec|specs|e2e|integration_test|test_driver|cypress|playwright)\/|\.(test|spec)\.[a-z]+$|_test\.(dart|go|py)$|(^|\/)test_[^/]*\.py$|Test\.(php|java|kt)$/i;
 export const isTestFile = (f) => TEST_RE.test(f);
-const VENDORED_RE = /(^|\/)(public\/(vendor|plugins|assets\/vendor|libs?|build|js\/vendor)|static\/vendor|assets\/vendor)\/|\.min\.(js|css)$|\.bundle\.js$|\.map$/i;
-export const isVendored = (f) => VENDORED_RE.test(f);
+const VENDORED_RE = /(^|\/)(public|static|assets|wwwroot)\/(.+\/)?(vendors?|plugins|libs?|build|dist|external|cdn|third[-_]?party|node_modules)\/|\.min\.(js|css)$|\.bundle\.js$|\.map$/i;
+// well-known libraries copied into a project by hand (jquery-3.7.1.js, bundle.js…)
+const LIBRARY_FILE = /(^|\/)(jquery[\w.-]*|bootstrap[\w.-]*|popper[\w.-]*|moment[\w.-]*|lodash[\w.-]*|underscore[\w.-]*|select2[\w.-]*|parsley[\w.-]*|datatables[\w.-]*|chart[\w.-]*|gauge[\w.-]*|feather[\w.-]*|swiper[\w.-]*|slick[\w.-]*|owl\.carousel[\w.-]*|toastr[\w.-]*|sweetalert[\w.-]*|axios[\w.-]*|vue(\.global|\.runtime)?[\w.-]*|react(-dom)?[\w.-]*|bundle|vendor|polyfills?)\.js$/i;
+export const isVendored = (f) => VENDORED_RE.test(f) || LIBRARY_FILE.test(f);
 
 // Every file under `root` (relative to the repo), skipping dependency and
 // build folders, secrets and the folders of other apps. Sorted, capped.

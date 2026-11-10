@@ -30,14 +30,20 @@ function segScore(c, r) {
   return -1;
 }
 
-function alignScore(cs, rs) {
+// WHY the literal rule: a route made of parameters ("x/{a}/{b}") would
+// otherwise match any call of the right length by its tail.
+function alignScore(cs, rs, partial = false) {
   if (cs.length !== rs.length) return -1;
   let s = 0;
+  let lit = 0;
   for (let i = 0; i < cs.length; i++) {
     const v = segScore(cs[i], rs[i]);
     if (v < 0) return -1;
+    if (v === 3) lit++;
     s += v;
   }
+  const callHasLiteral = cs.some((x) => x !== '{}');
+  if (callHasLiteral && lit === 0 && (partial || rs.every((x) => x === '{}'))) return -1;
   return s;
 }
 
@@ -53,14 +59,14 @@ export function matchCall(call, routes) {
       let sc = alignScore(cs, rs);
       let how = 'exact';
       if (sc < 0 && rs.length > cs.length && rs.length - cs.length <= 3 && cs.length) {
-        sc = alignScore(cs, rs.slice(rs.length - cs.length));
+        sc = alignScore(cs, rs.slice(rs.length - cs.length), true);
         if (sc >= 0) {
           sc -= 1.5 * (rs.length - cs.length);
           how = 'tail';
         }
       }
       if (sc < 0 && cs.length > rs.length && cs.length - rs.length <= 2 && rs.length) {
-        sc = alignScore(cs.slice(cs.length - rs.length), rs);
+        sc = alignScore(cs.slice(cs.length - rs.length), rs, true);
         if (sc >= 0) {
           sc -= 2 * (cs.length - rs.length);
           how = 'head-trimmed';
@@ -87,6 +93,10 @@ export function linkSystem(home) {
   const byName = new Map();
   for (const r of routes) if (r.name) byName.set(`${r.app}|${r.name}`, r);
   const own = ownHosts(system);
+  const appsWithRoutes = new Set(routes.map((r) => r.app));
+  // Server code (a PHP controller, a Python view) calls OTHER services over
+  // HTTP, never its own routes; browser and app code may call its own.
+  const serverSide = (c) => (c.side ? c.side === 'server' : /\.(php|py|java|kt|go|rb)$/.test(c.file) && !/\.blade\.php$/.test(c.file));
   const ov = new Map((overrides.links || []).filter((o) => o && o.source).map((o) => [String(o.source), o]));
   const usedOv = new Set();
   const out = [];
@@ -119,10 +129,18 @@ export function linkSystem(home) {
         out.push({ ...base, status: 'unresolved', reason: c.reason });
         continue;
       }
-      const m = matchCall({ ...c, app: id }, routes);
+      const server = serverSide(c);
+      if (c.host && !own.some((h) => c.host === h || c.host.endsWith('.' + h))) {
+        out.push({ ...base, status: 'external' });
+        continue;
+      }
+      const m = matchCall({ ...c, app: id }, server ? routes.filter((r) => r.app !== id) : routes);
       const external = c.host && !own.some((h) => c.host === h || c.host.endsWith('.' + h));
       if (!m) {
-        out.push({ ...base, status: external ? 'external' : 'no-route' });
+        // a call to a backend URL when no other app in this system serves routes:
+        // that backend is simply not part of this breakdown
+        const outside = (server || c.base) && ![...appsWithRoutes].some((x) => x !== id);
+        out.push({ ...base, status: external ? 'external' : outside ? 'outside-system' : 'no-route' });
         continue;
       }
       let best = m.best;
@@ -175,7 +193,7 @@ export function summaryLines(links, apps) {
     const calls = links.calls.filter((c) => c.app === id);
     if (!calls.length) continue;
     const t = tally(calls);
-    L.push(`${id}: ${t.calls} calls: ${t.matched || 0} matched (${t.withScreen} with a screen), ${t['method-mismatch'] || 0} method mismatch, ${t['no-route'] || 0} no route, ${t.unresolved || 0} unresolved, ${t.ambiguous || 0} ambiguous, ${t.external || 0} external${t.ignored ? `, ${t.ignored} ignored` : ''}`);
+    L.push(`${id}: ${t.calls} calls: ${t.matched || 0} matched (${t.withScreen} with a screen), ${t['method-mismatch'] || 0} method mismatch, ${t['no-route'] || 0} no route, ${t.unresolved || 0} unresolved, ${t.ambiguous || 0} ambiguous, ${t.external || 0} external${t['outside-system'] ? `, ${t['outside-system']} to a backend outside this system` : ''}${t.ignored ? `, ${t.ignored} ignored` : ''}`);
   }
   for (const [id, a] of apps) {
     const rs = links.routes.filter((r) => r.app === id);
@@ -202,6 +220,16 @@ function linksMd(links, apps) {
   sec('Method mismatch', 'The path matches a route but the method differs.', C.filter((c) => c.status === 'method-mismatch'), (c) => `\`${c.cite}\` (${c.app}) ${c.method} \`${c.uri || c.routeName}\` -> route \`${c.route.key}\` in ${c.route.app}`);
   sec('Ambiguous calls', 'More than one route fits; add a links: fix to overrides.yaml.', C.filter((c) => c.status === 'ambiguous'), (c) => `\`${c.cite}\` (${c.app}) ${c.method} \`${c.uri}\` -> ${c.candidates.map((x) => `\`${x.key}\` (${x.app})`).join(' or ')}`);
   sec('Calls whose URL is only known at run time', 'The scripts cannot work out the path without running the app. Add the base-URL name to overrides.yaml (base_url_names:) or a links: fix.', C.filter((c) => c.status === 'unresolved'), (c) => `\`${c.cite}\` (${c.app}) ${c.method}: ${c.reason}`);
+  const outside = C.filter((c) => c.status === 'outside-system');
+  if (outside.length) {
+    const groups = new Map();
+    for (const c of outside) {
+      const g = (c.uri || '').split('/').slice(0, 1).join('/') || '/';
+      groups.set(g, (groups.get(g) || 0) + 1);
+    }
+    L.push(`## Calls to a backend that is not in this system (${outside.length})`, '', 'Server-side calls to a backend base URL (such as backend_url) that no repo in this breakdown serves. They are not bugs: add the backend repo to the breakdown (stage 1) to link them screen by screen.', '');
+    L.push(`By first path part: ${[...groups.entries()].sort((a, b) => b[1] - a[1]).slice(0, 40).map(([g, n]) => `\`${g}\` (${n})`).join(', ')}`, '');
+  }
   sec('Calls to outside services', 'Calls to hosts that are not this system.', C.filter((c) => c.status === 'external'), (c) => `\`${c.cite}\` (${c.app}) ${c.method} ${c.host || ''}/${c.uri || ''}`, 40);
   sec('Calls with a route but no screen', 'Matched, but the call sits in a service or helper file rather than a screen; the folder (area) is shown.', C.filter((c) => c.status === 'matched' && !c.screen), (c) => `\`${c.cite}\` (${c.app}, ${c.area}) ${c.method} \`${c.uri || c.routeName}\` -> \`${c.route.key}\``, 60);
   for (const [id] of apps) {

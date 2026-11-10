@@ -12,6 +12,7 @@ It prints one line per app: calls matched, method mismatches, calls with no rout
 
 ## 2. What to tell the user (at most 6 bullets)
 
+- **Calls to a backend outside this system:** server-side calls to a backend URL when no repo in this breakdown serves routes for it. They are not bugs. Say how many there are, and suggest running stage 1 again with the backend repo (and the mobile app, if there is one) so they link screen by screen.
 - **Calls with no matching route:** likely bugs or removed endpoints. Show at most 5 from `links.md`, with file:line.
 - **Calls whose URL is only known at run time:** the count. If many are in one file, the app probably builds URLs from a base-URL name the scripts don't know. Ask the user for that name and add it to `<home>/sdlc-docs/_map/overrides.yaml` under `base_url_names:`. That file is the user's: append to it, never rewrite it. Then run steps 1 and 2 of stage 3 again for that repo, and this step.
 - **Ambiguous calls:** the count. A `links:` entry in `overrides.yaml` fixes one; let the user decide.

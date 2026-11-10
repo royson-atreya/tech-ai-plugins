@@ -2,6 +2,34 @@
 
 All notable changes to tech-plugin. Versions follow semantic versioning; the version is set only in `.claude-plugin/plugin.json`.
 
+## 0.3.1 (2026-11-11)
+
+Fixes from the first real run, on a Laravel web app whose backend was not part of the breakdown.
+
+### Fixed
+
+- **Server code no longer links to its own app's routes.** A PHP controller calling `config('app.backend_url') . '/patients'` had been matched to the app's own `GET patients` page, which gave hundreds of false matches and method mismatches.
+  - Server-side calls are now matched only against other apps.
+  - When no app in the system serves them, they are reported as "calls to a backend that is not in this system", not as likely bugs.
+- **Tighter route matching.** A route made of parameters (`deleteReport/{a}/{b}`) no longer matches an unrelated call by its tail: a partial match needs at least one fixed word in common.
+- **Calls to an outside host** (for example an AWS Lambda URL) never match the app's own routes.
+- **Constant lookup.** A constant is matched by its last word only for constants holders (`StringsConst.login`, `ROUTES.x`, `config()`, `window`). `event.target` no longer matches an unrelated `target` constant, so `Map.delete(...)` is no longer counted as an API call.
+- **Blade `$.ajax` calls** are counted once instead of twice.
+- **Vendored libraries** copied into `public/js` (`jquery-*.js`, `bundle.js`, `external/`, `cdn/`…) are skipped by name. This drops their false services (Stripe) and hosts.
+- **Reasons for unresolved calls** no longer copy any code text.
+
+### Added
+
+- **More URLs worked out:**
+  - local variables assigned earlier in the same function (`$apiUrl = config(...) . '/x'`);
+  - properties set in a constructor (`$this->apiUrl`);
+  - project URL helpers called with a literal path (`$this->backendUrl('/x')`);
+  - ternaries, one call per branch;
+  - `window.x = "{{ route('name') }}"` and `const x = "{{ route() }}"` set in Blade;
+  - query-string variables, which now end the path (`'/page' + buildQuery(...)`).
+- **Page scripts:** a script loaded by exactly one Blade page (`<script src="{{ asset('js/x.js') }}">`) credits its calls to that page.
+- **Reader version stamp:** facts read by an older reader are read again after a plugin upgrade. The links, the module refresh (no new approval when no route moved) and the documents follow, so "Already up to date" never hides results from an older reader.
+
 ## 0.3.0 (2026-11-11)
 
 Build step 4 of 11: `breakdown` stages 3–6.

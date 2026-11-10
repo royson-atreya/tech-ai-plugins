@@ -93,6 +93,10 @@ function unwrap(tok, lang) {
     const args = splitArgs(masked, 0, inner.length);
     if (args.length) return urlParts(inner, masked, args[0].start, args[0].end, lang);
   }
+  // a project helper that builds a backend URL from a path: backendUrl('/x'), $this->apiUrl('/x')
+  if ((m = /^(?:\$this->|self::|static::|this\.|[A-Z]\w*::)?([A-Za-z_]\w*)\s*\(\s*(['"])(\/?[\w\/{}.-]+)\2\s*\)$/.exec(tok)) && /(url|uri|endpoint|api|path)/i.test(m[1]) && !/^(asset|mix|secure_asset|public_path|storage_path|base_path|app_path|resource_path)$/.test(m[1])) {
+    return [{ dyn: m[1], base: true }, { lit: m[3].startsWith('/') ? m[3] : '/' + m[3] }];
+  }
   if ((m = /^Uri\.(https?)\s*\(([\s\S]*)\)$/.exec(tok))) {
     const inner = m[2];
     const masked = maskLite(inner);
@@ -216,6 +220,23 @@ function matchBrace(s, open) {
   return s.length - 1;
 }
 
+// A constant by its full name (StringsConst.login), or by its last word when
+// the chain starts at a constants holder (a Class, ALL_CAPS, config(), window,
+// this). Never `event.target` -> some unrelated `target` constant.
+function lookupConst(consts, dyn) {
+  if (/[\s=|&!?<>]/.test(dyn.replace(/\?\./g, '.'))) return null;
+  const k = constKey(dyn);
+  if (consts.has(k)) return consts.get(k);
+  const segs = k.split('.');
+  if (segs.length === 1) return null;
+  const root = segs[0];
+  if (/^[A-Z]/.test(root) || /^(config|window|this|self|static|env|constants?|routes?|urls?|endpoints?|api)$/i.test(root)) return consts.get(segs[segs.length - 1]) || null;
+  return null;
+}
+
+const QUERYISH = /(^|[^A-Za-z]|[a-z](?=[A-Z]))(query|Query|params|Params|qs|QS|queryString|QueryString|search|Search|filters?|Filters?)$/;
+const queryish = (dyn) => QUERYISH.test(String(dyn).replace(/\([\s\S]*\)$/, '').replace(/^\$/, ''));
+
 const constKey = (dyn) =>
   dyn
     .replace(/^(this|self|widget|static|self::|static::)(\.|->|::)/, '')
@@ -232,8 +253,7 @@ export function resolveUrl(parts, consts, baseRe, depth = 0) {
   let expanded = [];
   for (const p of parts) {
     if (p.dyn !== undefined && depth < 4) {
-      const k = constKey(p.dyn);
-      const c = consts.get(k) || consts.get(k.split('.').pop());
+      const c = lookupConst(consts, p.dyn);
       if (c && !isBase(p.dyn, baseRe) && !c.base) {
         expanded.push(...c.parts.map((x) => ({ ...x })));
         viaConst = viaConst || c.cite;
@@ -246,7 +266,7 @@ export function resolveUrl(parts, consts, baseRe, depth = 0) {
     }
     expanded.push(p);
   }
-  if (depth < 4 && expanded.some((p) => p.dyn !== undefined && !p.base && (consts.get(constKey(p.dyn)) || consts.get(constKey(p.dyn).split('.').pop())))) {
+  if (depth < 4 && expanded.some((p) => p.dyn !== undefined && !p.base && lookupConst(consts, p.dyn))) {
     const r = resolveUrl(expanded, consts, baseRe, depth + 1);
     return { ...r, viaConst: r.viaConst || viaConst };
   }
@@ -281,7 +301,10 @@ export function resolveUrl(parts, consts, baseRe, depth = 0) {
   for (const p of rest) {
     if (p.lit !== undefined) text += p.lit;
     else if (p.route) text += `{route:${p.route}}`;
-    else {
+    else if (queryish(p.dyn)) {
+      text += '?';
+      break;
+    } else {
       text += '{}';
       if (p.dyn && p.dyn !== '%' && p.dyn !== '{}') names.push(p.dyn);
     }
@@ -307,7 +330,7 @@ export function resolveUrl(parts, consts, baseRe, depth = 0) {
 
 const shortNames = (names) =>
   names
-    .map((n) => n.replace(/\s+/g, ' ').slice(0, 40))
+    .map((n) => n.replace(/(["'`])(?:\\.|(?!\1).)*\1/g, '…').replace(/\s+/g, ' ').slice(0, 40))
     .slice(0, 3)
     .join(', ');
 
@@ -321,7 +344,7 @@ export function isBase(dyn, baseRe) {
 // ------------------------------------------------------------------ constants
 
 const CONST_PATTERNS = {
-  js: [/\b(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[\w<>[\]| ]+)?=\s*/g, /(?:^|[{,\s])([A-Za-z_$][\w$]*)\s*:\s*(?=["'`])/g, /\bstatic\s+(?:readonly\s+)?([A-Za-z_$][\w$]*)\s*(?::\s*\w+)?=\s*/g],
+  js: [/\bwindow\.([A-Za-z_$][\w$]*)\s*=(?!=)\s*/g, /\b(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[\w<>[\]| ]+)?=\s*/g, /(?:^|[{,\s])([A-Za-z_$][\w$]*)\s*:\s*(?=["'`])/g, /\bstatic\s+(?:readonly\s+)?([A-Za-z_$][\w$]*)\s*(?::\s*\w+)?=\s*/g],
   dart: [/\b(?:static\s+)?(?:const|final)\s+(?:String\s+)?([A-Za-z_]\w*)\s*=\s*/g, /\bString\s+get\s+([A-Za-z_]\w*)\s*=>\s*/g, /\b(?:static\s+)?String\s+([A-Za-z_]\w*)\s*=\s*/g],
   php: [/\bconst\s+([A-Za-z_]\w*)\s*=\s*/g, /\b(?:public|protected|private)\s+(?:static\s+)?(?:string\s+)?\$([A-Za-z_]\w*)\s*=\s*/g, /\bdefine\s*\(\s*['"](\w+)['"]\s*,\s*/g],
   py: [/^[ \t]*([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*str\s*)?=\s*/gm],
@@ -371,12 +394,13 @@ export function collectConsts(files, src, baseRe) {
     consts.set(key, entry);
   };
   for (const file of files) {
-    const lang = langOf(file);
+    const page = /\.(blade\.php|html?|vue|svelte)$/i.test(file);
+    const lang = page ? 'js' : langOf(file);
     const pats = lang === 'kt' ? CONST_PATTERNS.java : CONST_PATTERNS[lang];
     if (!pats) continue;
     const s = src(file);
     if (!s) continue;
-    if (!/['"`]/.test(s.text) || !/\/|https?:/.test(s.text)) continue;
+    if (!/['"`]/.test(s.text) || !/\/|https?:|route\(/.test(s.text)) continue;
     for (const re of pats) {
       re.lastIndex = 0;
       let m;
@@ -400,7 +424,7 @@ export function collectConsts(files, src, baseRe) {
         const text = parts.map((p) => p.lit || '').join('');
         const absolute = /^[a-z]+:\/\//i.test(text);
         const alias = parts.length === 1 && parts[0].dyn !== undefined && isBase(parts[0].dyn, baseRe);
-        const urlish = alias || absolute || (parts.some((p) => p.lit !== undefined && p.lit.includes('/')) && !ASSET.test(text.replace(/[?#].*$/, ''))) || (parts.some((p) => p.dyn !== undefined && isBase(p.dyn, baseRe)) && parts.length > 1);
+        const urlish = alias || parts.some((p) => p.route) || absolute || (parts.some((p) => p.lit !== undefined && p.lit.includes('/')) && !ASSET.test(text.replace(/[?#].*$/, ''))) || (parts.some((p) => p.dyn !== undefined && isBase(p.dyn, baseRe)) && parts.length > 1);
         if (!urlish) continue;
         const base = alias || (absolute && parts.length === 1 && /^[a-z]+:\/\/[^/]+\/?[^/]*\/?$/i.test(text)) || (isBase(nm, baseRe) && !parts.some((p) => p.lit && /^\/[a-z]/i.test(p.lit) && parts.indexOf(p) > 0));
         const entry = { parts, cite: `${file}:${s.lineAt(m.index)}`, base };
@@ -510,13 +534,13 @@ function sitesIn(s, lang, alsoJs = false) {
     // named arguments: someApi.call(url: X, method: MethodType.post)
     const reNamed = /(?<![\w$.'"])(url|endpoint|apiUrl|api_url|path)\s*:\s*(?![\s/])/g;
     while ((m = reNamed.exec(mask))) {
-      if (lang === 'js' && m[1] === 'path') continue;
+      if ((lang === 'js' || alsoJs) && m[1] === 'path') continue;
       const open = enclosingOpen(mask, m.index);
       if (open === -1 || mask[open] !== '(' && lang === 'dart') continue;
       const head = code.slice(Math.max(0, open - 60), open).replace(/[\s(]*$/, '').match(/([A-Za-z_$][\w$.]*)$/);
       const headName = head ? head[1] : '';
       if (/^(GoRoute|Route|path|RouteConfig|NetworkImage|Image\.network|CachedNetworkImage|launchUrl|WebView|Link)$/.test(headName.split('.').pop())) continue;
-      if (lang === 'js' && /^(axios|\$\.ajax|jQuery\.ajax|ajax|request)$/i.test(headName.replace(/\s+/g, ''))) continue; // handled above
+      if ((lang === 'js' || alsoJs) && /^(axios|\$\.ajax|jQuery\.ajax|ajax|request|[\w$]+\.request|[\w$]+\.fetch)$/i.test(headName.replace(/\s+/g, ''))) continue; // handled above
       const close = closing(mask, open);
       if (close === -1) continue;
       const vs = m.index + m[0].length;
@@ -609,6 +633,113 @@ function sitesIn(s, lang, alsoJs = false) {
   return out;
 }
 
+// ------------------------------------------------------------------ local variables
+
+// End of an assigned value: ; or , or a line end at depth 0, unless the line
+// continues with a concatenation operator.
+function valueEnd(mask, vs) {
+  let depth = 0;
+  for (let e = vs; e < mask.length; e++) {
+    const c = mask[e];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') {
+      if (depth === 0) return e;
+      depth--;
+    } else if (depth === 0 && (c === ';' || c === ',')) return e;
+    else if (depth === 0 && c === '\n') {
+      const before = mask.slice(Math.max(vs, e - 40), e).trimEnd();
+      const after = mask.slice(e + 1, e + 40).trimStart();
+      if (/[.+(]$/.test(before) || /^[.+]/.test(after)) continue;
+      return e;
+    }
+  }
+  return mask.length;
+}
+
+// The value most recently assigned to a variable before `pos`, in the same
+// function: $url = config('app.backend_url') . '/x'; (then $url .= '/y').
+// `$this->prop` is looked up anywhere in the file (constructors set it).
+function localValue(s, lang, name, pos) {
+  const prop = /^\$this->(\w+)$/.exec(name) || /^this\.(\w+)$/.exec(name);
+  let from = prop ? 0 : Math.max(0, pos - 8000);
+  if (!prop) {
+    const fnRe = lang === 'py' ? /\n[ \t]*(?:async\s+)?def\s/g : lang === 'php' ? /\bfunction\s+\w+\s*\(/g : lang === 'js' ? /\bfunction\b|=>\s*\{/g : null;
+    if (fnRe) {
+      fnRe.lastIndex = from;
+      let m;
+      let last = -1;
+      while ((m = fnRe.exec(s.mask)) && m.index < pos) last = m.index;
+      if (last >= 0) from = last;
+    }
+  }
+  const target = prop ? (lang === 'php' ? `\\$this->${prop[1]}` : `this\\.${prop[1]}`) : name.replace(/\$/g, '\\$');
+  const re = new RegExp(`(?:^|[^\\w$>.])(?:(?:const|let|var|final|String|string)\\s+)?${target}\\s*(?::\\s*[\\w<>?\\[\\]]+\\s*)?(\\.=|\\+=|=)(?![=>])\\s*`, 'g');
+  re.lastIndex = from;
+  const hits = [];
+  let m;
+  while ((m = re.exec(s.mask))) {
+    if (!prop && m.index >= pos) break;
+    hits.push({ op: m[1], vs: m.index + m[0].length, at: m.index });
+    if (prop && m[1] === '=') break; // the first plain assignment of a property
+  }
+  let start = -1;
+  for (let i = hits.length - 1; i >= 0; i--) if (hits[i].op === '=') {
+    start = i;
+    break;
+  }
+  if (start === -1) return null;
+  let alts = [[]];
+  for (const h of hits.slice(start)) {
+    const ve = valueEnd(s.mask, h.vs);
+    const opts = branches(s.mask, h.vs, ve).map(([a, b]) => urlParts(s.code, s.mask, a, b, lang));
+    alts = h.op === '=' ? opts : alts.flatMap((x) => opts.map((o) => x.concat(o))).slice(0, 4);
+  }
+  return { alts, at: hits[start].at };
+}
+
+// Replaces simple variables by the values assigned to them. Returns a list of
+// alternatives (a ternary gives two), at most 4.
+function expandLocals(parts, s, lang, pos, depth = 0) {
+  if (depth > 2) return [parts];
+  const simple = lang === 'php' ? /^\$(?:this->)?[A-Za-z_]\w*$/ : /^(?:this\.)?[A-Za-z_$][\w$]*$/;
+  let alts = [[]];
+  for (const p of parts) {
+    let opts = [[p]];
+    if (p.dyn !== undefined && !p.base && simple.test(p.dyn) && p.dyn !== '$this' && p.dyn !== 'this' && !queryish(p.dyn)) {
+      const v = localValue(s, lang, p.dyn, pos);
+      if (v && v.alts.length && v.alts.every((a) => a.length && a.length <= 12) && !(v.alts.length === 1 && v.alts[0].length === 1 && v.alts[0][0].dyn === p.dyn)) {
+        opts = v.alts.flatMap((a) => expandLocals(a, s, lang, v.at, depth + 1));
+      }
+    }
+    alts = alts.flatMap((x) => opts.map((o) => x.concat(o))).slice(0, 4);
+  }
+  return alts;
+}
+
+// `cond ? '/a' : '/b'` gives two calls, one per branch.
+function branches(mask, start, end) {
+  let depth = 0;
+  let q = -1;
+  for (let i = start; i < end; i++) {
+    const c = mask[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (depth === 0 && c === '?' && mask[i + 1] !== '.' && mask[i + 1] !== '?' && mask[i - 1] !== '?') {
+      q = i;
+      break;
+    }
+  }
+  if (q === -1) return [[start, end]];
+  depth = 0;
+  for (let i = q + 1; i < end; i++) {
+    const c = mask[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (depth === 0 && c === ':' && mask[i + 1] !== ':' && mask[i - 1] !== ':') return [[q + 1, i], [i + 1, end]];
+  }
+  return [[start, end]];
+}
+
 // All calls of one app. `skip` = Set of "file:line" route definitions (a
 // router.get('/x', handler) is a route, not a call). `screenFiles` = Set of
 // files that are screens (a call in a screen file is credited to it).
@@ -631,13 +762,14 @@ export function readCalls({ files, src, baseRe = null, consts = null, skip = new
         const last = s.code.slice(site.args[site.args.length - 1].start, site.args[site.args.length - 1].end).trim();
         if (/^(async\s+)?(function\b|\(?[\w\s,{}:]*\)?\s*=>)/.test(last) && !/^\{/.test(last)) continue;
       }
-      const parts = urlParts(s.code, s.mask, site.start, site.end, site.lang || lang);
+      const alternatives = branches(s.mask, site.start, site.end).flatMap(([bs, be]) => expandLocals(urlParts(s.code, s.mask, bs, be, site.lang || lang), s, site.lang || lang, site.pos)).slice(0, 4);
+      for (const parts of alternatives) {
       if (!parts.length) continue;
       const r = resolveUrl(parts, C, baseRe);
       const literalPath = parts.some((p) => p.lit !== undefined && (p.lit.includes('/') || /^[a-z]+:/i.test(p.lit)));
       const slashless = parts.length === 1 && parts[0].lit !== undefined && /^[a-z][\w-]*(\/|$)/i.test(parts[0].lit);
       if (r.resolved) {
-        if (r.uri && ASSET.test(r.uri)) continue;
+        if (r.uri && (ASSET.test(r.uri) || /(^|\/)\.\.?(\/|$)/.test(r.uri) || /\.json$/i.test(r.uri))) continue;
         if (!(r.base || r.host || r.viaConst || r.routeName || literalPath || (slashless && site.httpish))) continue;
         if (!site.httpish && !r.base && !r.host && !r.viaConst && !r.routeName && !(r.uri || '').includes('/') && parts.length === 1) continue;
       } else if (!site.httpish) continue;
@@ -660,9 +792,12 @@ export function readCalls({ files, src, baseRe = null, consts = null, skip = new
         viaConst: r.viaConst || null,
         screen: screenFiles.get(file) || null,
         area: J(...dir.slice(0, Math.min(dir.length, 3))),
+        base: !!r.base,
+        side: ['php', 'py', 'java', 'kt', 'go'].includes(lang) && !/\.(blade\.php|vue|svelte|html?)$/i.test(file) ? 'server' : 'client',
         class: r.resolved && !r.baseGuessed && !site.methodGuessed ? 'Verified' : 'Inferred',
       };
       calls.push(call);
+      }
     }
   }
   return { calls, consts: C };

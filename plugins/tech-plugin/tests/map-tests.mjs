@@ -795,3 +795,148 @@ describe('module-proposer agent and stage guides', () => {
     assert.match(fs.readFileSync(path.join(PLUGIN, 'references/breakdown/stage-5-modules.md'), 'utf8'), /Never run `write` without the user's yes/);
   });
 });
+
+// ================================================================ fixes from the first real run (a Laravel web app with its backend outside the system)
+describe('real-run fixes: a Laravel web app whose backend is not in the system', () => {
+  const R = path.join(G.W, 'webonly');
+  put(path.join(R, 'composer.json'), JSON.stringify({ require: { 'laravel/framework': '^10.0' }, autoload: { 'psr-4': { 'App\\': 'app/' } } }));
+  put(path.join(R, 'artisan'), '#!/usr/bin/env php\n');
+  put(path.join(R, 'routes/web.php'), `<?php
+use App\\Http\\Controllers\\PatientController;
+use App\\Http\\Controllers\\PlanController;
+Route::get('patients', [PatientController::class, 'index']);
+Route::post('patient/addClient', [PatientController::class, 'add']);
+Route::delete('deleteReport/{medicalId}/{patientId}', [PatientController::class, 'deleteReport']);
+Route::post('verify-login-otp', [PatientController::class, 'otp']);
+Route::post('verify-email-login-otp', [PatientController::class, 'emailOtp']);
+Route::post('getPlanStatus', [PlanController::class, 'status'])->name('getPlanStatus');
+Route::get('medical-assessment-v3', [PatientController::class, 'assessment']);
+Route::get('/', [PatientController::class, 'home']);
+`);
+  put(path.join(R, 'app/Http/Controllers/PatientController.php'), `<?php
+namespace App\\Http\\Controllers;
+use Illuminate\\Support\\Facades\\Http;
+class PatientController extends Controller
+{
+    protected $apiUrl;
+    public function __construct() { $this->apiUrl = config('app.backend_url'); }
+    public function index() {
+        $list = Http::post(config('app.backend_url') . '/patients');
+        return view('patients.index', ['list' => $list]);
+    }
+    public function add() {
+        $apiUrl = config('app.backend_url') . 'patient/addClient';
+        return Http::post($apiUrl, ['x' => 1]);
+    }
+    public function deleteReport() { return Http::post($this->apiUrl . '/custom-data/getContentTypesWiseData'); }
+    public function home() { return Http::asJson()->post($this->backendTourUrl('/welcome-tour/complete')); }
+    public function otp() { return Http::get($dummyUrls['x'] . '?key=abc123'); }
+    private function backendTourUrl(string $path): string { return rtrim(config('app.backend_url'), '/') . $path; }
+}
+`);
+  put(path.join(R, 'app/Http/Controllers/PlanController.php'), '<?php\nnamespace App\\Http\\Controllers;\nclass PlanController extends Controller {}\n');
+  put(path.join(R, 'resources/views/patients/index.blade.php'), `@extends('layouts.main')
+<script src="{{ asset('js/patients.js') }}"></script>
+<script>
+  window.planStatusUrl = "{{ route('getPlanStatus') }}";
+  var requestUrl = '/medical-assessment-v3' + buildStateQuery({ tab: 1 });
+  $.ajax({ url: requestUrl, type: 'GET' });
+</script>
+`);
+  put(path.join(R, 'resources/views/layouts/main.blade.php'), '<script src="{{ asset(\'js/common.js\') }}"></script>@yield("content")\n');
+  put(path.join(R, 'resources/views/other.blade.php'), '@extends("layouts.main")\n');
+  put(path.join(R, 'public/js/patients.js'), `function login(isPhone) {
+  let url = isPhone ? '/verify-login-otp' : '/verify-email-login-otp';
+  $.ajax({ url: url, type: 'POST' });
+}
+function plan() { $.post(window.planStatusUrl); }
+function check(event) {
+  const dropdown = event?.currentTarget || event?.target;
+  changeTimes.delete(dropdown);
+}
+fetch('https://x123.lambda-url.ap-south-1.on.aws/', { method: 'POST' });
+$.getJSON('../json/states.json');
+`);
+  put(path.join(R, 'public/js/common.js'), "const cfg = { target: '/medical-assessment-v3' };\n$.post('/getPlanStatus');\n");
+  put(path.join(R, 'public/js/jquery-dataTables.js'), "var s = 'stripe'; $.ajax({ url: '/vendor-call' });\n// https://jsperf.com/x\n");
+  spawnSync('git', ['init', '-q', '-b', 'main', R]);
+  spawnSync('git', ['-C', R, 'add', '-A']);
+  let calls;
+  let links;
+  test('stages 1-4 run on a single web repo', () => {
+    stage12(R, [{ path: R, role: 'web' }]);
+    ok(run('map.mjs', ['--repo', R, '--home', R, '--no-graph']));
+    ok(run('link.mjs', ['--home', R]));
+    calls = facts(R).apps[0].calls;
+    links = readJ(docs(R, '_map/links.json')).calls;
+  });
+  const by = (re) => calls.filter((c) => re.test(c.cite));
+  const st = (cite) => links.find((c) => c.cite === cite);
+  test('server-side calls never match the app\'s own routes; with no backend in the system they are "outside this system"', () => {
+    const c = by(/PatientController\.php:9$/)[0];
+    assert.deepEqual([c.uri, c.side, c.base], ['patients', 'server', true]);
+    assert.equal(st(c.cite).status, 'outside-system');
+    assert.equal(st(by(/PatientController\.php:14$/)[0].cite).status, 'outside-system');
+    assert.ok(!links.some((l) => l.status === 'method-mismatch' && /Controllers/.test(l.cite)));
+    assert.match(fs.readFileSync(docs(R, '_map/links.md'), 'utf8'), /## Calls to a backend that is not in this system \(\d+\)/);
+  });
+  test('a local variable assigned in the same function is followed ($apiUrl = config() . "x")', () => assert.equal(by(/PatientController\.php:14$/)[0].uri, 'patient/addClient'));
+  test('a property set in the constructor is followed ($this->apiUrl)', () => assert.equal(by(/PatientController\.php:16$/)[0].uri, 'custom-data/getContentTypesWiseData'));
+  test('a URL helper with a literal path resolves ($this->backendTourUrl("/x"))', () => assert.equal(by(/PatientController\.php:17$/)[0].uri, 'welcome-tour/complete'));
+  test('reasons never copy code text', () => {
+    const u = by(/PatientController\.php:18$/)[0];
+    assert.equal(u.resolved, false);
+    assert.ok(!/abc123|['"]/.test(u.reason), u.reason);
+  });
+  test('a ternary in a local variable gives one call per branch, each linked', () => {
+    const two = by(/patients\.js:3$/).map((c) => c.uri).sort();
+    assert.deepEqual(two, ['verify-email-login-otp', 'verify-login-otp']);
+    assert.ok(links.filter((l) => /patients\.js:3$/.test(l.cite)).every((l) => l.status === 'matched'));
+  });
+  test('window globals set in Blade from route() resolve in page scripts', () => {
+    const c = by(/patients\.js:5$/)[0];
+    assert.equal(c.routeName, 'getPlanStatus');
+    assert.deepEqual(st(c.cite).route.key, 'POST getPlanStatus');
+  });
+  test('a query-string variable ends the path ("/medical-assessment-v3" + buildStateQuery(...))', () => {
+    const c = by(/index\.blade\.php:6$/);
+    assert.deepEqual(c.map((x) => x.uri), ['medical-assessment-v3']);
+  });
+  test('a Blade $.ajax is counted once', () => assert.equal(calls.filter((c) => /index\.blade\.php/.test(c.file)).length, 1));
+  test('Map.delete(event.target) is not a call; constants are not matched by a stray last word', () => assert.deepEqual(by(/patients\.js:8$/), []));
+  test('an outside host never matches the app\'s own routes', () => assert.equal(st(by(/patients\.js:10$/)[0].cite).status, 'external'));
+  test('relative static files are not API calls', () => assert.deepEqual(by(/patients\.js:11$/), []));
+  test('vendored libraries are skipped by name (calls, services, hosts)', () => {
+    const a = facts(R).apps[0];
+    assert.ok(!a.calls.some((c) => /jquery/.test(c.file)));
+    assert.ok(!a.externals.systems.some((s) => s.system === 'Stripe'));
+    assert.ok(!a.externals.otherHosts.some((h) => h.host === 'jsperf.com'));
+  });
+  test('a script loaded by exactly one page is credited to that page; one the layout loads, to none', () => {
+    assert.deepEqual(facts(R).apps[0].screens.find((s) => s.id === 'patients.index').scripts, ['public/js/patients.js']);
+    assert.equal(by(/patients\.js:3$/)[0].screen, 'patients.index');
+    assert.equal(by(/common\.js:2$/)[0].screen, null);
+  });
+  test('a parameter-only route does not match an unrelated call by its tail', () => {
+    const rt = [{ key: 'DELETE deleteReport/{a}/{b}', method: 'DELETE', uri: 'deleteReport/{a}/{b}', shape: 'deleteReport/{}/{}', app: 'x' }];
+    assert.equal(matchCall({ method: 'POST', uri: 'custom-data/getX', shape: 'custom-data/getX', app: 'y' }, rt), null);
+    assert.ok(matchCall({ method: 'DELETE', uri: 'deleteReport/{}/{}', shape: 'deleteReport/{}/{}', app: 'y' }, rt));
+  });
+  test('after a reader upgrade the code is read again, then links, a refresh and the documents follow', () => {
+    const sf = docs(R, '_state/breakdown.json');
+    const s0 = readJ(sf);
+    s0.repos[0].mapped.readers = 1;
+    // stamps as a run before the version stamp wrote them: "commit:tree"
+    s0.stages['4'].inputs = Object.fromEntries(Object.entries(s0.stages['4'].inputs).map(([k, v]) => [k, v.replace(/:r\d+$/, '')]));
+    fs.writeFileSync(sf, JSON.stringify(s0));
+    const ff = docs(R, '_map/webonly/facts.json');
+    const f0 = readJ(ff);
+    delete f0.readers; // facts written by a reader before the version stamp existed
+    fs.writeFileSync(ff, JSON.stringify(f0));
+    const s = status(R);
+    assert.equal(s.next, 3);
+    assert.match(s.message, /code readers were improved/);
+    assert.match(ok(run('map.mjs', ['--repo', R, '--home', R, '--no-graph'])), /webonly \[laravel\]/);
+    assert.equal(status(R).next, 4);
+  });
+});
