@@ -1,0 +1,62 @@
+# Words a non-technical reader may not know. plain.mjs warns when the people
+# layer uses one; say it in plain words instead ("the system", "saved",
+# "the page", "sign-in"). One word or phrase per line; # starts a comment.
+API
+endpoint
+backend
+back-end
+frontend
+front-end
+server
+database
+DB
+payload
+JSON
+XML
+null
+boolean
+integer
+parameter
+param
+query
+schema
+middleware
+controller
+route
+router
+handler
+migration
+cache
+cookie
+token
+JWT
+OAuth
+webhook
+callback
+async
+synchronous
+deploy
+deployment
+repository
+repo
+commit
+config
+environment variable
+CRUD
+UI
+UX
+frontend validation
+backend validation
+HTTP
+URL
+URI
+AJAX
+SDK
+regex
+upload API
+CSRF
+CORS
+S3
+bucket
+Lambda
+OTP API

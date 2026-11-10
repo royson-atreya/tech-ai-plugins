@@ -2,6 +2,37 @@
 
 All notable changes to tech-plugin. Versions follow semantic versioning; the version is set only in `.claude-plugin/plugin.json`.
 
+## 0.4.0 (2026-11-11)
+
+Build step 5 of 11: `document` and `validate`.
+
+### Added
+
+- **`/tech-plugin:document <module> [spec|brd|prd]`** writes the functional spec, BRD and PRD, in that order. Each document has two layers:
+  - **People layer:** an "In short" box, plain words, and a tag on every statement.
+  - **Evidence and technical layer:** Appendix A gives each tag its source as `repo:path:line` and its class; Appendix B holds the technical detail.
+
+  Anything not provable becomes a question for a named role. Requirement IDs (`BR-01`, `<MODULE>-R01`) are never renumbered or lost.
+- **Fact pack** (`scripts/document/doc.mjs facts`): the module's routes, access checks, validation rules, messages, page labels (translations resolved), backend calls, tables, services, unused routes and recorded decisions. Every fact is cited, and code text is redacted for keys and personal data.
+- **Freshness:** "Already up to date" when nothing changed; a rebuild, with what changed, when the code changed; a question before rebuilding a BRD or PRD after the spec changed.
+- **`/tech-plugin:validate <module>`** runs:
+  - `check-doc.mjs` (structure, tags, IDs, citations, secrets, personal data, staleness);
+  - `plain.mjs` (no code in the people layer; warnings for long sentences, jargon and missing glossary terms);
+  - the readability reviewer, then the doc-checker. The writer fixes what they find.
+
+  It then records sign-offs. The owner, PO or BA approves the people layer (Reviewed), and a developer approves the technical layer (Approved). A critical module needs two checker passes and a decision on every open question. Check reports and sign-offs apply to one exact text.
+- **Agents:**
+  - `doc-writer` (Sonnet, medium) and `doc-writer-deep` (Opus, high, for money, security or clinical modules);
+  - `doc-checker` and `doc-checker-deep` (read-only);
+  - `readability-reviewer` (read-only).
+- **Supporting tools:** `scripts/document/glossary.mjs` adds terms once. `scripts/lib/redact.mjs` covers keys and personal data (emails, phone numbers, Aadhaar- and PAN-like numbers), and `scripts/lib/frontmatter.mjs` reads and writes document stamps.
+- **Tests:** `tests/document-tests.mjs` (69 tests).
+
+### Changed
+
+- **`links.md`** counts pages people open directly (GET page routes, routes that render a page) apart from routes nothing calls.
+- **Error prefix:** script errors start with "tech-plugin:".
+
 ## 0.3.2 (2026-11-11)
 
 ### Changed

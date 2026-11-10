@@ -15,7 +15,7 @@ export const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(path.d
 export const DOCS = 'sdlc-docs';
 
 export function fail(msg, code = 1) {
-  process.stderr.write(`tech-plugin breakdown: ${msg}\n`);
+  process.stderr.write(`tech-plugin: ${msg}\n`);
   process.exit(code);
 }
 

@@ -164,7 +164,12 @@ export function linkSystem(home) {
     }
   }
   // route usage
-  const usage = new Map(routes.map((r) => [`${r.app}|${r.key}`, { app: r.app, key: r.key, handler: r.handler, cite: r.cite, callers: [] }]));
+  // a page people open in the browser (a GET page route, or one that renders a
+  // screen) is in use even when no code calls it
+  const renders = new Set();
+  for (const [aid, a] of apps) for (const s of a.screens) for (const h of s.renderedBy || []) renders.add(`${aid}|${h}`);
+  const isPage = (r) => (r.surface === 'page' && r.method === 'GET') || r.kind === 'view' || renders.has(`${r.app}|${r.handler}`) || (apps.get(r.app).readers || []).includes('web') && r.kind !== 'api-route';
+  const usage = new Map(routes.map((r) => [`${r.app}|${r.key}`, { app: r.app, key: r.key, handler: r.handler, cite: r.cite, page: !!isPage(r), callers: [] }]));
   for (const c of out) if (c.route && (c.status === 'matched' || c.status === 'method-mismatch')) {
     const u = usage.get(`${c.route.app}|${c.route.key}`);
     if (u && u.callers.length < 25) u.callers.push({ app: c.app, cite: c.cite, screen: c.screen || null });
@@ -198,7 +203,8 @@ export function summaryLines(links, apps) {
   for (const [id, a] of apps) {
     const rs = links.routes.filter((r) => r.app === id);
     if (!rs.length) continue;
-    L.push(`${id}: ${rs.length} routes: ${rs.filter((r) => r.count).length} called by an app, ${rs.filter((r) => !r.count).length} not called by any app in this system`);
+    const pages = rs.filter((r) => !r.count && r.page).length;
+    L.push(`${id}: ${rs.length} routes: ${rs.filter((r) => r.count).length} called by an app, ${pages ? `${pages} pages people open directly, ` : ''}${rs.filter((r) => !r.count && !r.page).length} not called by any app in this system`);
   }
   if (links.unusedOverrides.length) L.push(`overrides that match no call: ${links.unusedOverrides.join(', ')}`);
   return L;
@@ -233,7 +239,7 @@ function linksMd(links, apps) {
   sec('Calls to outside services', 'Calls to hosts that are not this system.', C.filter((c) => c.status === 'external'), (c) => `\`${c.cite}\` (${c.app}) ${c.method} ${c.host || ''}/${c.uri || ''}`, 40);
   sec('Calls with a route but no screen', 'Matched, but the call sits in a service or helper file rather than a screen; the folder (area) is shown.', C.filter((c) => c.status === 'matched' && !c.screen), (c) => `\`${c.cite}\` (${c.app}, ${c.area}) ${c.method} \`${c.uri || c.routeName}\` -> \`${c.route.key}\``, 60);
   for (const [id] of apps) {
-    const rs = links.routes.filter((r) => r.app === id && !r.count);
+    const rs = links.routes.filter((r) => r.app === id && !r.count && !r.page);
     if (!rs.length) continue;
     const groups = new Map();
     for (const r of rs) {

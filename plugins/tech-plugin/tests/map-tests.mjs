@@ -511,7 +511,7 @@ describe('stages 4-6 end to end (Laravel + Flutter system)', () => {
     const out = ok(run('link.mjs', ['--home', H]));
     assert.match(out, /^web: 5 calls: 4 matched \(3 with a screen\), 0 method mismatch, 1 no route, 0 unresolved/m);
     assert.match(out, /^mobile: 8 calls: 6 matched \(1 with a screen\), 0 method mismatch, 1 no route, 1 unresolved/m);
-    assert.match(out, /^backend: 21 routes: 8 called by an app, 13 not called by any app in this system$/m);
+    assert.match(out, /^backend: 21 routes: 8 called by an app, 1 pages people open directly, 12 not called by any app in this system$/m);
   });
   test('links: mobile calls without the base path reach the API routes (Inferred), not the web pages', () => {
     const L = readJ(S('_map/links.json'));
@@ -523,7 +523,7 @@ describe('stages 4-6 end to end (Laravel + Flutter system)', () => {
   test('links.md lists calls with no route (likely bugs) and routes nothing calls', () => {
     const md = fs.readFileSync(S('_map/links.md'), 'utf8');
     assert.match(md, /## Calls with no matching route \(2\)[\s\S]*DashboardController\.php:11` \(web\) GET `api\/legacy\/stats`[\s\S]*api_service\.dart:12` \(mobile\) POST `feedback`/);
-    assert.match(md, /## Routes in backend that no app in this system calls \(13\)/);
+    assert.match(md, /## Routes in backend that no app in this system calls \(12\)/);
   });
   test('overrides.yaml was created for the person, with an explanation, and is never rewritten', () => {
     const t = fs.readFileSync(S('_map/overrides.yaml'), 'utf8');

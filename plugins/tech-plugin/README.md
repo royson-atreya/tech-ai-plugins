@@ -2,7 +2,7 @@
 
 An SDLC/STLC toolbox for Claude Code that takes any software project from "understand what we have" to "release it safely", with a person approving every important step. Commands are `/tech-plugin:<command>`; each product repo gets its own notebook folder, `<repo>/sdlc-docs/`.
 
-**Status: 0.3.2, build step 4 of 11.** This version contains the safety guard, the session banner, `doctor`, and all six stages of `breakdown`. The other commands come in later steps (see `docs/PLAN.md` in the marketplace repo).
+**Status: 0.4.0, build step 5 of 11.** This version contains the safety guard, the session banner, `doctor`, `breakdown`, `document` and `validate`. The other commands come in later steps (see `docs/PLAN.md` in the marketplace repo).
 
 ## Install from the local marketplace
 
@@ -38,7 +38,13 @@ Then run `/tech-plugin:doctor`. Don't load the plugin into a session you are usi
 | `/tech-plugin:doctor` | Checks Claude Code, node, git, Python, uv, graphify, the LSP plugin for each language it finds, the effort setting and the Zoho Sprints connection, then lists the commands. It never installs anything; it prints the commands for you to run. `doctor --ci` is coming in a later step. |
 | `/tech-plugin:breakdown` | Breaks a system into business modules. It finds the repos, asks 5 business questions, and detects each app's stack (`profile.md`, which you confirm). Then it reads the code and links screens to APIs across apps. It proposes modules (`modules.yaml`, which you approve) and writes the module catalogue, scope cards and module map. |
 
-Both commands run on Haiku at low effort and are manual-only (`disable-model-invocation`), so they add nothing to the context until you run them. The one step that needs judgement, grouping code into modules, goes to the `module-proposer` agent on Opus at high effort.
+| `/tech-plugin:document <module>` | Writes the module's functional spec, BRD and PRD, in that order, from the code facts. Each has an "In short" box, a people layer in plain words, and an evidence appendix in which every statement cites the code. |
+| `/tech-plugin:validate <module>` | Runs the checks, an independent doc-checker that re-reads every cited line, and a readability reviewer. The writer fixes what they find. Then it records who approved each layer: the owner or PO for the people layer, a developer for the technical one. |
+
+All four commands run on Haiku at low effort and are manual-only (`disable-model-invocation`), so they add nothing to the context until you run them. The steps that need judgement go to agents:
+- **Grouping code into modules:** `module-proposer`, Opus at high effort.
+- **Writing:** `doc-writer`, Sonnet at medium effort; `doc-writer-deep`, Opus at high effort, for modules flagged money, security or clinical.
+- **Checking:** `doc-checker`, with `doc-checker-deep` for those modules; and `readability-reviewer`.
 
 ## breakdown
 
@@ -111,6 +117,44 @@ Nothing outside `sdlc-docs/` is touched, and secret files are never opened.
 | New, moved or removed routes | You are shown them and asked again. The agent keeps every approved id, name and boundary and only places the new items. |
 
 Edits you make to `system.yaml` are kept.
+
+## document and validate
+
+```
+/tech-plugin:document reports          # spec, then BRD, then PRD
+/tech-plugin:document reports prd      # one document
+/tech-plugin:validate reports          # checks, reviews, then your sign-off
+```
+
+**Two layers in every document.**
+- **People layer:** comes first and is for an owner, PO, QA tester or client who never opens the code. It has an "In short" box (what it does, who uses it, 3–5 key rules, how many questions are open), journeys, rules, and what happens when something goes wrong. It's written in plain words with no code names, and each statement carries a short tag like `[E4]`.
+- **Evidence and technical layer:** in the appendices.
+  - Appendix A turns each tag into `repo:path:line` and a class: Verified, Inferred, Assumption or Unknown.
+  - Appendix B holds the routes, the backend endpoints each page calls, validations and data.
+- **Questions instead of guesses.** Anything the code cannot prove becomes an open question for a named role. Business objectives and success measures are always questions for the owner.
+
+**The fact pack.** Before writing, a script collects everything about the module into `modules/<id>/_facts.md`, with every fact cited:
+- routes and access checks;
+- validation rules, and the error and success messages (Laravel);
+- page titles, labels and buttons (Blade, with translations resolved from the language files);
+- what each page asks the backend for, tables and services;
+- routes nothing uses;
+- decisions already made.
+
+Text from code is redacted for keys and personal data. The writer works from the fact pack and opens at most 15 source files.
+
+**Checks.**
+- **`check-doc.mjs`:** stamp; template headings; "In short"; every fact tagged and every tag resolved; IDs (`BR-01`, `<MODULE>-R01`) unique and never lost; every cited line exists and is not a secret file; no key-like strings or personal data; written from the current code.
+- **`plain.mjs`:** code names, paths, HTTP codes or SQL in the people layer fail. Long sentences, jargon and domain words missing from the glossary are warnings.
+- **The agents:** the doc-checker re-reads every cited line (twice for critical modules); the readability reviewer lists what a non-technical reader could not follow.
+
+**Sign-off.** Only a person approves, by role:
+- the owner, PO or BA approves the people layer (Draft → Reviewed);
+- a developer approves the technical layer (→ Approved).
+
+A critical module also needs a recorded decision on every open question. A sign-off applies to one exact text: when the document changes, it no longer counts. `modules.yaml` `doc_status` follows: none → draft → reviewed → approved. Everything is listed in `modules/<id>/checks/review-checklist.md`.
+
+**Running it again.** If the code and the input documents are unchanged, it answers "Already up to date". If the code changed, it rebuilds the document and says what changed. If the spec changed after the BRD or PRD was written, it asks before rebuilding them. IDs and the person's decisions are kept.
 
 **graphify.** If graphify is missing, doctor prints `uv tool install graphifyy` (it needs Python and uv). Don't run `graphify install`: that adds graphify's own Claude skill, and tech-plugin reads the graph itself.
 
@@ -205,6 +249,7 @@ node --test tests/
   4. an empty folder
 
   It checks detection fact by fact, runs stages 1–2 through the scripts the way the command does, and proves that no secret file is opened and nothing outside `sdlc-docs/` changes.
+- `tests/document-tests.mjs` builds the Laravel + Flutter fixtures through `breakdown` (`tests/golden-doc.mjs`). It checks the fact pack, the status and freshness rules, both checks on good and broken sample documents, ID stability, every sign-off rule, redaction, the definitions and the guard.
 - `tests/map-tests.mjs` adds real code to those fixtures (`tests/golden-map.mjs`) plus a Go service. It checks:
   - every reader against exact routes, screens, calls and tables, and the Laravel parser on edge cases;
   - URL resolution, route matching and the module rules;
@@ -230,10 +275,16 @@ scripts/breakdown/           find-repos, detect, write (stages 1-2), map (3), li
 scripts/lib/stacks.mjs       stack detection; lib/yaml.mjs small YAML reader/writer; lib/secretnames.mjs
 scripts/lib/readers/         code readers: laravel, flutter, node, web, python, spring, generic, calls, externals
 scripts/lib/graph.mjs        graphify wrapper and graph queries; lib/modules.mjs module expansion and coverage
+scripts/document/            doc (fact pack, status, prepare), check-doc, plain, signoff, glossary
+scripts/lib/readers/behaviour.mjs  validation rules, messages, page labels; lib/redact.mjs keys and personal data
 skills/doctor/SKILL.md       the doctor command
 skills/breakdown/SKILL.md    the breakdown command; stage details in references/breakdown/
 agents/stack-detector.md     read-only architecture notes for one app (Haiku)
 agents/module-proposer.md    proposes module boundaries for approval (Opus, high effort)
+agents/doc-writer*.md        writes one document (Sonnet; Opus for critical modules)
+agents/doc-checker*.md       re-reads every cited line (read-only; Opus for critical modules)
+agents/readability-reviewer.md  reads the people layer as a non-technical person (read-only)
+references/document/         writing rules, spec/BRD/PRD templates, jargon list, flows
 config/defaults.json         secret patterns, protected branches, safe-command lists, blocked hosts
 tests/                       guard, doctor and breakdown tests (node --test tests/)
 ```

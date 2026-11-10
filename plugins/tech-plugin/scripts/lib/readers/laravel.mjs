@@ -418,7 +418,7 @@ function routeOf(code, mask, s0, end, file, line, c, fq, ctlInfo, out) {
 
 // ------------------------------------------------------------------ classes
 
-function phpMethods(s) {
+export function phpMethods(s) {
   const out = [];
   const re = /\bfunction\s+(\w+)\s*\(/g;
   let m;
