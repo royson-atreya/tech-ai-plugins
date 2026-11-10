@@ -1,0 +1,29 @@
+{
+  "description": "tech-plugin safety guard (fail-closed PreToolUse check on every tool call) and a one-line session banner. '|| exit 2' makes a missing node, or any exit code other than 0/2, block the call.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/banner.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/guard.mjs\" || exit 2",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

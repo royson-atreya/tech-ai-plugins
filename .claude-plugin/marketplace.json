@@ -1,0 +1,16 @@
+{
+  "name": "tech-ai-plugins",
+  "owner": {
+    "name": "Royson Gonsalves"
+  },
+  "metadata": {
+    "description": "Atreya Innovations internal Claude Code plugins (local marketplace)."
+  },
+  "plugins": [
+    {
+      "name": "tech-plugin",
+      "source": "./plugins/tech-plugin",
+      "description": "SDLC/STLC toolbox for any software project, with a fail-closed safety guard: secrets blocked, repos read-only until a work item is approved, git read-only, production hosts blocked, Zoho Sprints writes confirmed."
+    }
+  ]
+}

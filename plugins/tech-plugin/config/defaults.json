@@ -1,0 +1,47 @@
+{
+  "_about": "tech-plugin guard defaults. A project can add <repo>/sdlc-docs/config.json with the same keys; it may only ADD restrictions (see README). Git and self-protection rules live in code and cannot be configured.",
+
+  "secretPatterns": [
+    ".env", ".env.*", "*.jks", "*.keystore", "*.p12", "*.pem", "id_rsa*",
+    "firebase-*.json", "google-services.json", "GoogleService-Info.plist"
+  ],
+  "secretExceptions": [".env.example"],
+
+  "protectedBranches": ["main", "master", "production"],
+
+  "blockedHosts": [],
+
+  "safeCommands": {
+    "_about": "Framework commands that can touch data. Only the listed subcommands run; every other one is blocked everywhere, even with an approved work item.",
+    "php artisan": ["route:list", "list", "about"],
+    "python manage.py": ["help", "check", "showmigrations", "show_urls"],
+    "rails": ["routes", "about", "--version", "-v"],
+    "rake": ["-T", "--tasks", "routes", "about"]
+  },
+
+  "readOnlySubcommands": {
+    "_about": "Subcommands that only read. Inside a repo they run without an approved work item; any other subcommand needs one (installs are always blocked inside repos).",
+    "npm": ["ls", "list", "ll", "la", "view", "info", "show", "v", "outdated", "explain", "why", "root", "prefix", "help", "search", "--version", "-v"],
+    "yarn": ["list", "info", "why", "help", "--version", "-v"],
+    "pnpm": ["list", "ls", "why", "outdated", "help", "--version", "-v"],
+    "bun": ["--version", "-v", "pm"],
+    "composer": ["show", "info", "outdated", "depends", "why", "why-not", "prohibits", "licenses", "validate", "diagnose", "list", "help", "--version", "-V"],
+    "pip": ["list", "show", "freeze", "check", "help", "--version", "-V"],
+    "pip3": ["list", "show", "freeze", "check", "help", "--version", "-V"],
+    "poetry": ["show", "check", "list", "help", "--version", "-V"],
+    "pipenv": ["graph", "--version", "--venv", "--where", "--py"],
+    "uv": ["help", "--version", "-V"],
+    "gem": ["list", "search", "info", "env", "help", "--version", "-v"],
+    "bundle": ["list", "show", "info", "outdated", "help", "--version", "-v"],
+    "go": ["version", "env", "list", "doc", "help"],
+    "cargo": ["search", "help", "--version", "-V"],
+    "flutter": ["doctor", "devices", "help", "--version"],
+    "dart": ["info", "help", "--version"],
+    "pod": ["search", "env", "--version"],
+    "gradle": ["help", "--version", "-v"],
+    "mvn": ["--version", "-v"],
+    "dotnet": ["--version", "--info", "--list-sdks", "--list-runtimes"]
+  },
+
+  "personalData": "TODO(build step with database access): personal-data guard (masked columns, synthetic test data, no patient data in prompts/docs/tickets). Not enforced yet."
+}
