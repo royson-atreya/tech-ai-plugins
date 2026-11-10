@@ -2,7 +2,7 @@
 
 An SDLC/STLC toolbox for Claude Code that takes any software project from "understand what we have" to "release it safely", with a person approving every important step. Commands are `/tech-plugin:<command>`; each product repo gets its own notebook folder, `<repo>/sdlc-docs/`.
 
-**Status: 0.3.1, build step 4 of 11.** This version contains the safety guard, the session banner, `doctor`, and all six stages of `breakdown`. The other commands come in later steps (see `docs/PLAN.md` in the marketplace repo).
+**Status: 0.3.2, build step 4 of 11.** This version contains the safety guard, the session banner, `doctor`, and all six stages of `breakdown`. The other commands come in later steps (see `docs/PLAN.md` in the marketplace repo).
 
 ## Install from the local marketplace
 

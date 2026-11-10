@@ -227,7 +227,7 @@ function linksMd(links, apps) {
       const g = (c.uri || '').split('/').slice(0, 1).join('/') || '/';
       groups.set(g, (groups.get(g) || 0) + 1);
     }
-    L.push(`## Calls to a backend that is not in this system (${outside.length})`, '', 'Server-side calls to a backend base URL (such as backend_url) that no repo in this breakdown serves. They are not bugs: add the backend repo to the breakdown (stage 1) to link them screen by screen.', '');
+    L.push(`## Calls to a backend that is not in this system (${outside.length})`, '', 'Server-side calls to a backend base URL (such as backend_url) that no repo in this breakdown serves. They are not bugs, and this breakdown is complete without them. Only if you also want each page linked to the backend endpoint it calls, add the backend repo in stage 1.', '');
     L.push(`By first path part: ${[...groups.entries()].sort((a, b) => b[1] - a[1]).slice(0, 40).map(([g, n]) => `\`${g}\` (${n})`).join(', ')}`, '');
   }
   sec('Calls to outside services', 'Calls to hosts that are not this system.', C.filter((c) => c.status === 'external'), (c) => `\`${c.cite}\` (${c.app}) ${c.method} ${c.host || ''}/${c.uri || ''}`, 40);

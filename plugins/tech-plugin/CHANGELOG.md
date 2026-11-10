@@ -2,6 +2,12 @@
 
 All notable changes to tech-plugin. Versions follow semantic versioning; the version is set only in `.claude-plugin/plugin.json`.
 
+## 0.3.2 (2026-11-11)
+
+### Changed
+
+- Calls to a backend outside the breakdown are reported as information only. Each repo's breakdown is complete on its own, and breakdown no longer suggests adding other repos.
+
 ## 0.3.1 (2026-11-11)
 
 Fixes from the first real run, on a Laravel web app whose backend was not part of the breakdown.
