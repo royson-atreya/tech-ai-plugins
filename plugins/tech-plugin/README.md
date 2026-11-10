@@ -2,7 +2,7 @@
 
 An SDLC/STLC toolbox for Claude Code that takes any software project from "understand what we have" to "release it safely", with a person approving every important step. Commands are `/tech-plugin:<command>`; each product repo gets its own notebook folder, `<repo>/sdlc-docs/`.
 
-**Status: 0.2.0, build step 3 of 11.** This version contains the safety guard, the session banner, `doctor`, and stages 1–2 of `breakdown`. The other commands come in later steps (see `docs/PLAN.md` in the marketplace repo).
+**Status: 0.3.0, build step 4 of 11.** This version contains the safety guard, the session banner, `doctor`, and all six stages of `breakdown`. The other commands come in later steps (see `docs/PLAN.md` in the marketplace repo).
 
 ## Install from the local marketplace
 
@@ -36,11 +36,11 @@ Then run `/tech-plugin:doctor`. Don't load the plugin into a session you are usi
 | Command | What it does |
 | --- | --- |
 | `/tech-plugin:doctor` | Checks Claude Code, node, git, Python, uv, graphify, the LSP plugin for each language it finds, the effort setting and the Zoho Sprints connection, then lists the commands. It never installs anything; it prints the commands for you to run. `doctor --ci` is coming in a later step. |
-| `/tech-plugin:breakdown` | Finds the repos and apps of a system, asks 5 business questions, detects each app's stack, and writes `system.yaml` and `profile.md` for you to confirm. Stages 1–2 of 6 in this version. |
+| `/tech-plugin:breakdown` | Breaks a system into business modules. It finds the repos, asks 5 business questions, and detects each app's stack (`profile.md`, which you confirm). Then it reads the code and links screens to APIs across apps. It proposes modules (`modules.yaml`, which you approve) and writes the module catalogue, scope cards and module map. |
 
-Both commands run on Haiku at low effort and are manual-only (`disable-model-invocation`), so they add nothing to the context until you run them.
+Both commands run on Haiku at low effort and are manual-only (`disable-model-invocation`), so they add nothing to the context until you run them. The one step that needs judgement, grouping code into modules, goes to the `module-proposer` agent on Opus at high effort.
 
-## breakdown (stages 1–2)
+## breakdown
 
 Run it in a repo, in a workspace folder that holds several repos, or with paths:
 
@@ -48,8 +48,8 @@ Run it in a repo, in a workspace folder that holds several repos, or with paths:
 /tech-plugin:breakdown                       # this repo, or every repo in this workspace
 /tech-plugin:breakdown ../backend ../mobile  # these folders
 /tech-plugin:breakdown --docs ~/Docs/specs   # also list a folder of business documents
-/tech-plugin:breakdown --only 2              # re-run one stage
-/tech-plugin:breakdown --refresh             # re-detect after code changes
+/tech-plugin:breakdown --only 3              # re-run one stage (1-6)
+/tech-plugin:breakdown --refresh             # re-read what changed
 ```
 
 **Stage 1: find the repos.**
@@ -68,7 +68,49 @@ Run it in a repo, in a workspace folder that holds several repos, or with paths:
 
 **What it writes.** In the home repo's `sdlc-docs/`: `system.yaml`, `profile.md`, `glossary.md` and `README.md`, plus `_state/` for progress. In every repo's own `sdlc-docs/`: `_map/<repo>/stack.json`, and in the other repos a `home.json` pointer to the home repo. Nothing outside `sdlc-docs/` is touched, and secret files are never opened; committed ones are listed by name so you can take them out of git.
 
-**Running it again.** If no repo changed since you confirmed the profile, it answers "Already up to date" at almost no token cost. A new commit, or a changed manifest, re-runs stage 2 for that repo only. Edits you make to `system.yaml` are kept when stage 1 runs again.
+**Stage 3: read the code.** Scripts read every app with the reader for its stack. Each reader produces the same kind of facts: routes, handlers, screens, API calls, tables and external services, each cited `path:line`.
+- **Laravel / Lumen:** all route forms, including groups, prefixes, resources, closures, named routes, included route files and Laravel 11 `bootstrap/app.php`. Also controllers, models, migrations and Blade views.
+- **Flutter:** GoRouter, MaterialApp, GetX and auto_route routes; Dio and `http` calls.
+- **Node:** Express, Fastify, Koa, hapi and NestJS, with mount prefixes followed across files. Tables from Prisma, TypeORM, Sequelize, Mongoose, Knex and Drizzle.
+- **Web:** Next.js (pages and app routers), Nuxt, SvelteKit, Remix, and React, Vue and Angular route tables.
+- **Python:** FastAPI, Flask and Django, including DRF routers. Tables from SQLAlchemy, Django models and Alembic.
+- **Spring:** Java and Kotlin controllers, Feign clients, and JPA or Flyway tables.
+- **Anything else:** a generic reader finds Go and Rails routes and groups code by the graphify graph. Everything it finds is marked Inferred.
+
+API calls are worked out without running anything, for example `"${AppEnvironment.baseUrl}/patients/$id"` becomes `patients/{}`, even through a constant defined in another file. A call whose URL only exists at run time is listed with its file:line, never guessed. External services are recorded as file and line only, so no key or URL text from the code is stored.
+
+**The code graph.** graphify runs offline and code-only, with no AI labels, on a temporary copy of the repo's code. The copy uses the guard's secret rules, so files a project marks as secret never reach graphify. The repo itself is never written to. The graph is kept in `sdlc-docs/_map/graphify/<repo>/`, stamped with the commit, and rebuilt only when the code changes. Without graphify the stage still runs and says so; with `"strict": true` in `sdlc-docs/config.json` it stops.
+
+**Stage 4: link the apps.** Every call is matched to the route that serves it, then to the handler and its tables, across web, mobile and backend. `_map/links.md` lists three things for a developer to look at:
+- calls with no matching route, which are likely bugs or removed endpoints;
+- routes no app calls, which are possibly unused, or called from outside;
+- calls that need a person.
+
+Matches found only by the end of the path are marked Inferred. You can fix what scripts cannot see in `_map/overrides.yaml`, which is your file: base-URL names, extra services, and links by hand.
+
+**Stage 5: propose modules.** The `module-proposer` agent (Opus) reads a compact summary and proposes business modules. Each has a plain name, a one-line purpose and risk flags: `money`, `security`, `clinical` or `personal-data`. A script expands the proposal and enforces the rule: **every backend route is in exactly one module, or unassigned with a reason**. You see the table and can rename, merge or split modules. `modules.yaml` is written only after your yes, and records who approved it. Module ids never change once approved.
+
+**Stage 6: write the breakdown.** Scripts write all of these in the home repo's `sdlc-docs/`, so the same input gives the same documents:
+- `modules/README.md`: the catalogue and a suggested order of next steps;
+- `modules/<id>/module.md`: one scope card per module, with screens, APIs, tables, services and connections. Your notes block is kept on every rewrite.
+- `system/overview.md`;
+- `system/diagrams/module-map.md`: a Mermaid map, with every arrow listed with its evidence.
+
+**What it writes.**
+- **In the home repo's `sdlc-docs/`:** `system.yaml`, `profile.md`, `glossary.md`, `modules.yaml`, `modules/`, `system/`, `README.md`, `_map/links.*`, `_map/candidates.md`, `_map/overrides.yaml`, and `_state/` for progress.
+- **In every repo's own `sdlc-docs/_map/`:** `stack.json`, `<repo>/facts.json` and `facts.md`, and `graphify/<repo>/`.
+
+Nothing outside `sdlc-docs/` is touched, and secret files are never opened.
+
+**Running it again.** If nothing changed, it answers "Already up to date" at almost no token cost. Otherwise only what changed is redone:
+
+| What changed | What runs again |
+|---|---|
+| A manifest | Stage 2 for that repo, and you confirm the profile again |
+| Code only | Stage 3 for that repo, then the links. If no route or screen moved, the module list stays as approved without asking, and the documents are rewritten. |
+| New, moved or removed routes | You are shown them and asked again. The agent keeps every approved id, name and boundary and only places the new items. |
+
+Edits you make to `system.yaml` are kept.
 
 **graphify.** If graphify is missing, doctor prints `uv tool install graphifyy` (it needs Python and uv). Don't run `graphify install`: that adds graphify's own Claude skill, and tech-plugin reads the graph itself.
 
@@ -163,6 +205,11 @@ node --test tests/
   4. an empty folder
 
   It checks detection fact by fact, runs stages 1–2 through the scripts the way the command does, and proves that no secret file is opened and nothing outside `sdlc-docs/` changes.
+- `tests/map-tests.mjs` adds real code to those fixtures (`tests/golden-map.mjs`) plus a Go service. It checks:
+  - every reader against exact routes, screens, calls and tables, and the Laravel parser on edge cases;
+  - URL resolution, route matching and the module rules;
+  - the graphify wrapper, with a fake graphify (`tests/fake-graphify.mjs`) that records what it was given, and with the real one when installed;
+  - the six stages end to end, including reruns, overrides, guard wiring, and that no secret is read and nothing outside `sdlc-docs/` changes.
 
 To validate the plugin and the marketplace:
 
@@ -179,11 +226,14 @@ hooks/hooks.json             guard (PreToolUse "*") and banner (SessionStart)
 scripts/guard.mjs            the guard; lib/ holds paths, config, shell tokenizer, Bash checks, rules
 scripts/banner.mjs           one-line session banner (systemMessage: costs no tokens)
 scripts/doctor.mjs           setup check used by /tech-plugin:doctor
-scripts/breakdown/           find-repos, detect, state, write (used by /tech-plugin:breakdown)
+scripts/breakdown/           find-repos, detect, write (stages 1-2), map (3), link (4), modules (5), catalogue (6), state, load
 scripts/lib/stacks.mjs       stack detection; lib/yaml.mjs small YAML reader/writer; lib/secretnames.mjs
+scripts/lib/readers/         code readers: laravel, flutter, node, web, python, spring, generic, calls, externals
+scripts/lib/graph.mjs        graphify wrapper and graph queries; lib/modules.mjs module expansion and coverage
 skills/doctor/SKILL.md       the doctor command
 skills/breakdown/SKILL.md    the breakdown command; stage details in references/breakdown/
 agents/stack-detector.md     read-only architecture notes for one app (Haiku)
+agents/module-proposer.md    proposes module boundaries for approval (Opus, high effort)
 config/defaults.json         secret patterns, protected branches, safe-command lists, blocked hosts
 tests/                       guard, doctor and breakdown tests (node --test tests/)
 ```

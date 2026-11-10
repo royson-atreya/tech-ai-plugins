@@ -1,0 +1,1 @@
+<a href="{{ route('login') }}">x</a><script>$.ajax({ url: "{{ route('reports.pdf') }}", type: 'POST' });</script>

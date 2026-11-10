@@ -3,3 +3,4 @@
 import('./guard-tests.mjs');
 import('./doctor-tests.mjs');
 import('./breakdown-tests.mjs');
+import('./map-tests.mjs');

@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DOCS, commitOf, fail, fingerprint, parseArgs, readJson, real, repoRoot, writeDocs } from './common.mjs';
+import { codeTree } from './load.mjs';
 
 export const STATE_REL = path.join('_state', 'breakdown.json');
 
@@ -65,6 +66,13 @@ export function findHome(cwd) {
   return null;
 }
 
+const stampKey = (m) => (m ? `${m.commit || 'none'}:${m.tree}` : null);
+const same = (a, b) => JSON.stringify(a || {}) === JSON.stringify(b || {});
+
+// Where the run stands and what to do next. Cheap: reads the progress file,
+// each repo's HEAD and a fingerprint of its files; never the facts themselves.
+//   changed      the repo's manifests changed since stage 2 (profile is stale)
+//   codeChanged  the repo's code changed since stage 3 read it
 export function status(cwd) {
   const home = findHome(cwd);
   if (!home) return { found: false, next: 1, message: 'No breakdown yet: start with stage 1.' };
@@ -75,30 +83,28 @@ export function status(cwd) {
     const exists = fs.existsSync(p);
     const commit = exists ? commitOf(p) : null;
     const fp = exists ? fingerprint(p) : null;
-    const changed = !exists || (r.detectedCommit !== undefined && (r.detectedCommit !== commit || r.fingerprint !== fp));
-    return { name: r.name, path: p, exists, detectedCommit: r.detectedCommit ?? null, currentCommit: commit, changed, detected: r.detectedCommit !== undefined };
+    const tree = exists ? codeTree(p).tree : null;
+    const changed = !exists || (r.detectedCommit !== undefined && r.fingerprint !== fp);
+    const codeChanged = !exists || !r.mapped || r.mapped.commit !== commit || r.mapped.tree !== tree;
+    return { name: r.name, path: p, role: r.role || null, exists, detectedCommit: r.detectedCommit ?? null, currentCommit: commit, changed, codeChanged, detected: r.detectedCommit !== undefined, mapped: !!r.mapped };
   });
-  const s1 = (st.stages && st.stages['1']) || {};
-  const s2 = (st.stages && st.stages['2']) || {};
+  const S = st.stages || {};
+  const stage = (n) => S[String(n)] || {};
+  const stamps = Object.fromEntries((st.repos || []).map((r) => [r.name, stampKey(r.mapped)]));
+  const names = (list) => list.map((r) => r.name).join(', ');
   let next;
   let message;
-  if (s1.status !== 'done') {
-    next = 1;
-    message = 'Stage 1 (find the repos) is not finished.';
-  } else if (repos.some((r) => !r.exists)) {
-    next = 1;
-    message = `Missing repo folder(s): ${repos.filter((r) => !r.exists).map((r) => r.name).join(', ')}.`;
-  } else if (s2.status !== 'done') {
-    next = 2;
-    message = s2.status === 'awaiting-confirmation' ? 'Stage 2 is waiting for your confirmation of the profile.' : 'Stage 2 (learn each repo) is not finished.';
-  } else if (repos.some((r) => r.changed || !r.detected)) {
-    next = 2;
-    message = `Code changed since stage 2 in: ${repos.filter((r) => r.changed || !r.detected).map((r) => r.name).join(', ')}.`;
-  } else {
-    next = 'up-to-date';
-    message = 'Already up to date: no repo changed since the profile was confirmed.';
-  }
-  return { found: true, home, system: st.system || null, stages: st.stages || {}, repos, next, message };
+  if (stage(1).status !== 'done') [next, message] = [1, 'Stage 1 (find the repos) is not finished.'];
+  else if (repos.some((r) => !r.exists)) [next, message] = [1, `Missing repo folder(s): ${names(repos.filter((r) => !r.exists))}.`];
+  else if (stage(2).status !== 'done') [next, message] = [2, stage(2).status === 'awaiting-confirmation' ? 'Stage 2 is waiting for your confirmation of the profile.' : 'Stage 2 (learn each repo) is not finished.'];
+  else if (repos.some((r) => r.changed || !r.detected)) [next, message] = [2, `Manifests changed since the profile was confirmed in: ${names(repos.filter((r) => r.changed || !r.detected))}.`];
+  else if (repos.some((r) => r.codeChanged)) [next, message] = [3, repos.every((r) => !r.mapped) ? 'Stage 3 (read the code) has not run yet.' : `Code changed since stage 3 in: ${names(repos.filter((r) => r.codeChanged))}.`];
+  else if (stage(4).status !== 'done' || !same(stage(4).inputs, stamps)) [next, message] = [4, 'Stage 4 (link the apps) needs to run.'];
+  else if (stage(5).status !== 'done') [next, message] = [5, stage(5).status === 'awaiting-approval' ? 'Stage 5 is waiting for your approval of the module list.' : 'Stage 5 (propose modules) has not run yet.'];
+  else if (!same(stage(5).inputs, stamps)) [next, message] = [5, 'Code changed since the modules were approved: checking whether any route or screen moved.'];
+  else if (stage(6).status !== 'done' || !same(stage(6).inputs, stamps) || stage(6).modules !== stage(5).modules) [next, message] = [6, 'Stage 6 (write the breakdown) needs to run.'];
+  else [next, message] = ['up-to-date', 'Already up to date: no code changed since the breakdown was written.'];
+  return { found: true, home, system: st.system || null, stages: S, repos, next, message };
 }
 
 function main() {

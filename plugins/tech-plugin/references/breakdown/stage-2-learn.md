@@ -51,3 +51,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/breakdown/write.mjs" confirm --home "<home>"
 ```
 
 It records "Confirmed in chat by <git user name> on <date>" and marks stage 2 done. Only do this after an explicit yes from the user.
+
+Then go straight on to stage 3, unless every repo is empty.
+
+A manifest change (a new framework or a version bump) sends a repo back to stage 2, and the profile needs confirming again. A plain code change does not: it only re-runs stage 3 for that repo.

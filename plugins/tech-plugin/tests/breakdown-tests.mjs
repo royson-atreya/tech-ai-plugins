@@ -354,18 +354,18 @@ describe('stages 1-2 end to end (nadi workspace)', () => {
     assert.match(fs.readFileSync(docs(H, 'profile.md'), 'utf8'), /Confirmed in chat by Test Person on \d{4}-\d{2}-\d{2}/);
     assert.match(fs.readFileSync(docs(H, 'README.md'), 'utf8'), /profile\.md` \| Stack, entry points and commands for each app \| Confirmed/);
   });
-  test('second run with no code change: already up to date (from any repo or the workspace)', () => {
+  test('after confirming: next is stage 3, found from any repo or the workspace', () => {
     for (const cwd of [G.nadi, H, G.mobile, path.join(G.web, 'routes')]) {
       const s = json(run('state.mjs', ['status', '--cwd', cwd]));
-      assert.deepEqual([s.found, s.home, s.next], [true, H, 'up-to-date'], cwd);
-      assert.match(s.message, /Already up to date/);
+      assert.deepEqual([s.found, s.home, s.next], [true, H, 3], cwd);
+      assert.match(s.message, /Stage 3 \(read the code\) has not run yet/);
     }
   });
-  test('a new commit in one repo: stage 2 again, only that repo changed', () => {
+  test('a new commit alone does not send a repo back to stage 2 (only manifest changes do)', () => {
     setCommit(G.mobile, 'develop', 'f'.repeat(40));
     const s = json(run('state.mjs', ['status', '--cwd', G.nadi]));
-    assert.equal(s.next, 2);
-    assert.deepEqual(s.repos.filter((r) => r.changed).map((r) => r.name), ['mobile']);
+    assert.equal(s.next, 3);
+    assert.deepEqual(s.repos.filter((r) => r.changed).map((r) => r.name), []);
     setCommit(G.mobile, 'develop', 'c'.repeat(40));
   });
   test('a manifest change without a commit is noticed too', () => {
@@ -456,7 +456,8 @@ describe('breakdown skill and agent definitions', () => {
   });
   test('the skill stays short; stage details load from references', () => {
     assert.ok(skill.split('\n').length < 60);
-    for (const f of ['references/breakdown/stage-1-find.md', 'references/breakdown/stage-2-learn.md']) assert.ok(fs.existsSync(path.join(PLUGIN, f)), f);
+    for (const n of [1, 2, 3, 4, 5, 6]) assert.match(skill, new RegExp(`stage-${n}-\\w+\\.md`));
+    for (const f of fs.readdirSync(path.join(PLUGIN, 'references/breakdown')).filter((x) => /^stage-/.test(x))) assert.ok(skill.includes(f), f);
   });
   test('the stack-detector agent is read-only Haiku', () => {
     assert.match(agent, /^tools: Read, Grep, Glob$/m);

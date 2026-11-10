@@ -162,9 +162,13 @@ function writeIndex(home, system) {
     '| `system.yaml` | Repos, your business answers, environments, connectors | stage 1 |',
     `| \`profile.md\` | Stack, entry points and commands for each app | ${prof} |`,
     '| `glossary.md` | Business terms in plain words | seeded in stage 1 |',
-    '| `_map/` | Raw facts from scripts. Regenerated; never edit by hand | stage 2 |',
-    '| `_state/` | Progress of /tech-plugin:breakdown | |',
   ];
+  const s5 = st && st.stages && st.stages['5'];
+  if (fs.existsSync(path.join(d, 'modules.yaml'))) lines.push(`| \`modules.yaml\` | The module list: boundaries you approved | ${s5 && s5.approvedBy ? `approved by ${s5.approvedBy}` : 'stage 5'} |`);
+  if (fs.existsSync(path.join(d, 'modules', 'README.md'))) lines.push('| `modules/README.md` | Module catalogue and suggested next steps: read this first | stage 6, Draft |');
+  if (fs.existsSync(path.join(d, 'system', 'overview.md'))) lines.push('| `system/overview.md` | The whole system on one page, with the module map | stage 6, Draft |');
+  if (fs.existsSync(path.join(d, '_map', 'links.md'))) lines.push('| `_map/links.md` | Which screen calls which API; calls with no route; routes nothing calls | stage 4 |');
+  lines.push('| `_map/` | Raw facts from scripts. Regenerated; never edit by hand (except `overrides.yaml`, which is yours) | stages 2-4 |', '| `_state/` | Progress of /tech-plugin:breakdown | |');
   if (fs.existsSync(path.join(d, 'config.json'))) lines.push('| `config.json` | Guard settings for this project (blocked hosts, secret patterns, branches) | yours |');
   if (others.length) lines.push('', `Other repos in this system: ${others.map((r) => `${r.name} (\`${r.path}/${DOCS}\`)`).join(', ')}.`);
   writeDocs(home, 'README.md', lines.join('\n') + '\n');
@@ -289,7 +293,7 @@ function renderProfile(home, { confirmedBy = null } = {}) {
   return repos;
 }
 
-function writeIndexFromYaml(home) {
+export function writeIndexFromYaml(home) {
   try {
     const system = parseYaml(fs.readFileSync(path.join(docsDir(home), 'system.yaml'), 'utf8'));
     if (system && system.system) writeIndex(home, system);

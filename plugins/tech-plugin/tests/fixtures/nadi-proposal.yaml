@@ -1,0 +1,69 @@
+backends:
+  - backend
+modules:
+  - id: auth
+    name: Sign-in
+    purpose: Lets doctors and patients sign in with a one-time password.
+    risk:
+      - flag: security
+        reason: passwords, OTPs and session tokens
+    parts:
+      - app: backend
+        handlers: [AuthController]
+      - app: web
+        extra_routes: ["GET login"]
+        screens: [auth.login]
+      - app: mobile
+        screens: [LoginScreen]
+  - id: patients
+    name: Patients
+    purpose: Keeps the list of patients and their details.
+    risk:
+      - flag: personal-data
+        reason: names and phone numbers
+    parts:
+      - app: backend
+        handlers: [PatientController]
+      - app: web
+        handlers: [PatientPageController]
+      - app: mobile
+        screens: [PatientScreen]
+  - id: reports
+    name: Pulse reports
+    purpose: Creates and shows pulse reports as PDFs.
+    risk:
+      - flag: clinical
+        reason: health findings shown to doctors
+    parts:
+      - app: backend
+        handlers: [ReportController]
+  - id: appointments
+    name: Appointments
+    purpose: Booking consultations.
+    parts:
+      - app: backend
+        handlers: [AppointmentController]
+      - app: mobile
+        screens: [BookingScreen, HomeScreen]
+  - id: payments
+    name: Payments
+    purpose: Takes payments through Razorpay.
+    risk:
+      - flag: money
+        reason: Razorpay orders and webhooks
+    parts:
+      - app: backend
+        handlers: [PaymentController]
+      - app: mobile
+        screens: [PaymentScreen]
+  - id: partner-sync
+    name: Partner sync
+    purpose: Sends data to the Samvit partner system.
+    parts:
+      - app: backend
+        handlers: [SamvitBridgeController]
+unassigned:
+  - match: "GET api/debug/*"
+    reason: debug page; should be removed before release
+  - match: "GET /"
+    reason: Laravel welcome page
