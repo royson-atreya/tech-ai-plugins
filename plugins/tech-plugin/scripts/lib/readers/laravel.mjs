@@ -539,6 +539,16 @@ function readBlade(files, root, src, handlers, routes) {
       for (const m of s.text.matchAll(/<script\b[^>]*\bsrc\s*=\s*["'](?:\{\{\s*(?:asset|url|mix|secure_asset)\(\s*['"]\/?([^'"]+?)['"][^}]*\}\}|\/([^"'{}]+?))(?:\?[^"']*)?["']/gi)) scripts.push(J(root, 'public', (m[1] || m[2]).replace(/^public\//, '')));
       for (const m of s.text.matchAll(/route\(\s*['"]([\w.:-]+)['"]/g)) links.push({ kind: 'route-name', target: m[1] });
       for (const m of s.text.matchAll(/(?:url\(\s*|href=|action=)['"](\/[\w\/{}.-]*)['"]/g)) links.push({ kind: 'url', target: m[1] });
+      for (const m of s.text.matchAll(/\burl\(\s*['"]([A-Za-z][\w\/{}.-]*)['"]/g)) links.push({ kind: 'url', target: '/' + m[1] });
+      // forms: <form action="{{ url('x') }}" method="POST"> posts to a route
+      for (const m of s.text.matchAll(/<form\b[^>]*>/gi)) {
+        const tag = m[0];
+        const meth = (/\bmethod\s*=\s*["']?(\w+)/i.exec(tag) || [])[1];
+        const r = /action\s*=\s*["']\{\{\s*route\(\s*['"]([\w.:-]+)['"]/.exec(tag);
+        const u = /action\s*=\s*["'](?:\{\{\s*url\(\s*['"]\/?([^'"]+)['"][^}]*\}\}|\/([^"'{}]+))["']/.exec(tag);
+        if (r) links.push({ kind: 'route-name', target: r[1], method: (meth || 'GET').toUpperCase(), form: true });
+        else if (u) links.push({ kind: 'url', target: '/' + (u[1] || u[2]), method: (meth || 'GET').toUpperCase(), form: true });
+      }
     }
     const by = rendered.get(id) || [];
     const viaRoutes = routes.filter((r) => !r.shadowed && ((r.view && r.view === id) || (r.controller && by.includes(r.handler))));

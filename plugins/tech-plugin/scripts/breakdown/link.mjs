@@ -18,6 +18,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { docsDir, fail, parseArgs, real, writeDocs } from './common.mjs';
+import { normUri, shapeOf } from '../lib/readers/common.mjs';
 import { factsStamps, loadSystem, ownHosts } from './load.mjs';
 import { loadState, saveState } from './state.mjs';
 
@@ -175,6 +176,21 @@ export function linkSystem(home) {
     if (u && u.callers.length < 25) u.callers.push({ app: c.app, cite: c.cite, screen: c.screen || null });
     if (u) u.count = (u.count || 0) + 1;
   }
+  // links and forms on pages (href, action, route()) use routes of the same app
+  for (const [aid, a] of apps) for (const s of a.screens) for (const l of s.links || []) {
+    let hits = [];
+    if (l.kind === 'route-name') hits = routes.filter((r) => r.app === aid && r.name === l.target);
+    else if (l.kind === 'url') {
+      const sh = shapeOf(normUri(l.target));
+      hits = routes.filter((r) => r.app === aid && r.shape === sh && (!l.method || r.method === l.method || r.method === 'ANY'));
+    }
+    for (const r of hits) {
+      const u = usage.get(`${r.app}|${r.key}`);
+      if (!u) continue;
+      u.linkedFrom = u.linkedFrom || [];
+      if (u.linkedFrom.length < 10 && !u.linkedFrom.includes(s.id)) u.linkedFrom.push(s.id);
+    }
+  }
   const unusedOverrides = [...ov.keys()].filter((k) => !usedOv.has(k));
   const links = { schema: 1, linkedAt: new Date().toISOString(), inputs: factsStamps(repos), calls: out, routes: [...usage.values()].map((u) => ({ ...u, count: u.count || 0 })), unusedOverrides };
   writeDocs(home, path.join('_map', 'links.json'), JSON.stringify(links, null, 1) + '\n');
@@ -203,8 +219,9 @@ export function summaryLines(links, apps) {
   for (const [id, a] of apps) {
     const rs = links.routes.filter((r) => r.app === id);
     if (!rs.length) continue;
-    const pages = rs.filter((r) => !r.count && r.page).length;
-    L.push(`${id}: ${rs.length} routes: ${rs.filter((r) => r.count).length} called by an app, ${pages ? `${pages} pages people open directly, ` : ''}${rs.filter((r) => !r.count && !r.page).length} not called by any app in this system`);
+    const linked = rs.filter((r) => !r.count && r.linkedFrom && r.linkedFrom.length).length;
+    const pages = rs.filter((r) => !r.count && !(r.linkedFrom && r.linkedFrom.length) && r.page).length;
+    L.push(`${id}: ${rs.length} routes: ${rs.filter((r) => r.count).length} called by an app, ${linked ? `${linked} opened from a page link or form, ` : ''}${pages ? `${pages} pages people open directly, ` : ''}${rs.filter((r) => !r.count && !r.page && !(r.linkedFrom && r.linkedFrom.length)).length} not called by any app in this system`);
   }
   if (links.unusedOverrides.length) L.push(`overrides that match no call: ${links.unusedOverrides.join(', ')}`);
   return L;
@@ -239,7 +256,7 @@ function linksMd(links, apps) {
   sec('Calls to outside services', 'Calls to hosts that are not this system.', C.filter((c) => c.status === 'external'), (c) => `\`${c.cite}\` (${c.app}) ${c.method} ${c.host || ''}/${c.uri || ''}`, 40);
   sec('Calls with a route but no screen', 'Matched, but the call sits in a service or helper file rather than a screen; the folder (area) is shown.', C.filter((c) => c.status === 'matched' && !c.screen), (c) => `\`${c.cite}\` (${c.app}, ${c.area}) ${c.method} \`${c.uri || c.routeName}\` -> \`${c.route.key}\``, 60);
   for (const [id] of apps) {
-    const rs = links.routes.filter((r) => r.app === id && !r.count && !r.page);
+    const rs = links.routes.filter((r) => r.app === id && !r.count && !r.page && !(r.linkedFrom && r.linkedFrom.length));
     if (!rs.length) continue;
     const groups = new Map();
     for (const r of rs) {

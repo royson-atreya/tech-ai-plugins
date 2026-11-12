@@ -68,7 +68,7 @@ describe('the fact pack', () => {
     before.backend = snapshot(G.backend);
     before.web = snapshot(G.web);
     before.mobile = snapshot(G.mobile);
-    assert.match(ok(run('doc.mjs', ['facts', 'patients', '--home', H])), /wrote modules\/patients\/_facts\.md: 10 routes, 3 screens, 1 tables/);
+    assert.match(ok(run('doc.mjs', ['facts', 'patients', '--home', H])), /wrote modules\/patients\/_facts\.md: 11 routes, 3 screens, 1 tables/);
     p = JSON.parse(fs.readFileSync(S('modules/patients/_facts.json'), 'utf8'));
     md = fs.readFileSync(S('modules/patients/_facts.md'), 'utf8');
   });
@@ -90,6 +90,11 @@ describe('the fact pack', () => {
     assert.ok(!p.notCalled.includes('web|GET patients'));
     assert.ok(p.notCalled.includes('backend|DELETE api/patients/{patient}'));
   });
+  test('a form on a page posts to a route: it is in use, and the pack says which page', () => {
+    assert.deepEqual(route('POST patients/export').linkedFrom, ['patients.show']);
+    assert.ok(!p.notCalled.includes('web|POST patients/export'));
+  });
+  test('the status says whether the breakdown is current', () => assert.equal(json(run('doc.mjs', ['status', 'patients', '--home', H])).breakdown.upToDate, true));
   test('a phone number in a code message is redacted', () => {
     assert.ok(!md.includes('9876543210'));
     assert.ok(!JSON.stringify(p).includes('9876543210'));
@@ -390,6 +395,7 @@ describe('check-doc catches broken documents', () => {
       assert.match(r.out, /the code facts changed since this was written/);
       const st = json(run('doc.mjs', ['status', 'patients', '--home', H]));
       assert.equal(st.docs.spec.state, 'facts-changed');
+      assert.equal(st.breakdown.upToDate, false);
       assert.match(st.facts.changes.join(), /details changed/);
     } finally {
       fs.writeFileSync(f, t);
@@ -416,6 +422,7 @@ describe('plain-language check', () => {
     ['an HTTP code', '| The patient cannot be found |', '| HTTP 404 |', /an HTTP status code/],
     ['a method and path', 'The doctor opens the patient list. [E2]', 'The doctor sends POST patients/1/report. [E2]', /HTTP method with a path/],
     ['backticks', 'The doctor opens the patient list. [E2]', 'The doctor opens `patients`. [E2]', /code in backticks/],
+    ['words about the tools', 'The doctor opens the patient list. [E2]', 'The scan found the patient list. [E2]', /words about the documentation tools/],
   ]) test(`fails on ${name}`, () => {
     const r = tryPlain((t) => t.replace(from, to));
     assert.equal(r.code, 1, r.out);
@@ -463,6 +470,15 @@ describe('BRD and PRD: IDs and links', () => {
     assert.match(check(pr.out).out, /PATIENTS-R01 is gone: keep it, or mark it "Removed \(reason\)"/);
     fs.writeFileSync(pr.out, pr.stamp + '\n' + PRD_BODY);
     assert.match(ok(check(pr.out)), /check-doc: PASS/);
+  });
+  test('a question asked once in the spec can be pointed at, not copied: [spec Q1]', () => {
+    const f = S('modules/patients/brd.md');
+    const keep = fs.readFileSync(f, 'utf8');
+    fs.writeFileSync(f, keep.replace('Only signed-in doctors reach the patient list. [E6]', 'Only signed-in doctors reach the patient list. [E6] [spec Q1]'));
+    assert.match(ok(check(f)), /check-doc: PASS/);
+    fs.writeFileSync(f, keep.replace('Only signed-in doctors reach the patient list. [E6]', 'Only signed-in doctors reach the patient list. [spec Q9]'));
+    assert.match(check(f).out, /\[spec Q9\] points at nothing in that document/);
+    fs.writeFileSync(f, keep);
   });
   test('a duplicate BR id fails', () => {
     const f = S('modules/patients/brd.md');

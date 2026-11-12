@@ -13,7 +13,7 @@ import { loadState } from './state.mjs';
 
 // Bump when a reader changes what it finds: facts read by an older reader are
 // then read again, even if the code did not change.
-export const READERS_VERSION = 2;
+export const READERS_VERSION = 3;
 
 export const factsRel = (name) => path.join('_map', name, 'facts.json');
 export const OVERRIDES_REL = path.join('_map', 'overrides.yaml');

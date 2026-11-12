@@ -31,6 +31,7 @@ const CODE = [
   ['an HTTP status code', /\bHTTP\s*\d{3}\b|\bstatus(?: code)?\s+[1-5]\d\d\b|\b[1-5]\d\d\s+(?:error|response|status)\b/i],
   ['SQL', /\b(SELECT\s+.+\s+FROM|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM)\b/i],
   ['a URL', /\bhttps?:\/\/|\bwww\.[a-z0-9-]+\./i],
+  ['words about the documentation tools (write about the product, not the scan)', /\b(fact pack|(?:the|automatic|code) scan|scanner|the scripts?|tech-plugin|modules\.yaml|_facts|approved purpose|code facts)\b/i],
 ];
 const ALLOWED_CAMEL = /^(iPhone|iPad|iOS|macOS|eSign|eKYC|mPIN|WhatsApp|YouTube|LinkedIn|PayPal|JavaScript|TypeScript|GitHub|PhonePe|OneSignal)$/;
 
@@ -62,7 +63,7 @@ export function plainCheck(file, home) {
     const raw = lines[k];
     if (/^<!--/.test(raw.trim()) || /^\|?\s*:?-{3,}/.test(raw.trim())) continue;
     const t = raw
-      .replace(/\[(E|Q)\d+\]/g, '')
+      .replace(/\[(?:(?:spec|brd) )?(E|Q)\d+\]/g, '')
       .replace(/^#{1,6}\s+/, '')
       .replace(/^>\s?/, '')
       .replace(/\*\*/g, '')

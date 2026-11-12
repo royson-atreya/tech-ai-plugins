@@ -63,7 +63,8 @@ class PatientPageController extends Controller
 $.ajax({ url: "{{ route('patients.report', 1) }}", type: "POST" });
 </script>
 `);
-  fs.appendFileSync(path.join(G.web, 'routes/web.php'), "Route::get('patients-help', [PatientPageController::class, 'help']);\n");
+  fs.appendFileSync(path.join(G.web, 'routes/web.php'), "Route::get('patients-help', [PatientPageController::class, 'help']);\nRoute::post('patients/export', [PatientPageController::class, 'export']);\n");
+  put(path.join(G.web, 'resources/views/patients/show.blade.php'), '@extends("layouts.app")\n<form action="{{ url(\'patients/export\') }}" method="POST" style="display:inline;"><button>Export</button></form>\n');
   spawnSync('git', ['-C', G.web, 'add', '-A']);
   const H = G.backend;
   const input = path.join(G.W, 'doc-in.json');

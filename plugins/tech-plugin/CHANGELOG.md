@@ -2,6 +2,24 @@
 
 All notable changes to tech-plugin. Versions follow semantic versioning; the version is set only in `.claude-plugin/plugin.json`.
 
+## 0.4.1 (2026-11-11)
+
+Fixes from reviewing the first real documents (the Frontend's `reports` module).
+
+### Fixed
+
+- **Pages that open a route through a form or link** (`<form action="{{ url('report/viewVisitReport') }}" method="POST">`, `href`, `route()`) now count as using it. Before, those routes were reported as used by nothing, and the documents repeated that. On the Frontend, routes nothing uses went from 217 to 35, and 103 are opened from a page.
+  - `links.md` counts these routes separately.
+  - The fact pack names the page that opens each route.
+  - The reader version is now 3, so `/tech-plugin:breakdown` re-reads the code once.
+
+### Changed
+
+- **Questions are asked once across spec, BRD and PRD.** A later document points back with `[spec Q6]` or `[brd Q2]` (checked by `check-doc`). The aim is at most 10 questions per document.
+- **The people layer may not mention the documentation tools** ("the scan", "fact pack", "approved purpose"…). `plain.mjs` fails on them.
+- **Clearer writing rules** for the "In short" key rules (full plain sentences), for certainty ("probably", never "(Inferred)"), and for plain verbs.
+- **`/tech-plugin:document` stops when the breakdown is not current**, so documents are never written from outdated code facts.
+
 ## 0.4.0 (2026-11-11)
 
 Build step 5 of 11: `document` and `validate`.

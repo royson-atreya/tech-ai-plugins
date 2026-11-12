@@ -31,6 +31,22 @@ Each document has two layers.
 - **Routes listed under "Routes no app in the breakdown calls"** are stated as such and asked about. Never describe them as live features.
 - **Calls to the backend outside this breakdown:** describe them in plain words, for example "the page asks the system for the patient's visits". List the endpoint in Appendix B. They are not bugs.
 
+## Open questions: few, asked once
+
+- **Each question is asked once across the three documents:**
+  - the spec asks about how things behave;
+  - the BRD asks about goals, success, ownership and where it is in use;
+  - the PRD asks only what is new for the requirements.
+- **To rely on a question an earlier document asked,** tag it `[spec Q6]` or `[brd Q2]`. Never copy it into your own list. The same goes for evidence: cite `spec E3` in Appendix A instead of re-proving.
+- **Aim for at most 10 questions per document.** Merge related ones ("Which roles use these screens, and do admins and patients use their own screens instead?"). Leave a question out when a decision already answers it (decisions in the fact pack).
+- **A question names one role,** the person who can answer it. Developer questions are fine, but write them so the owner understands why they matter: "Could changing a number in the link show another patient's report?"
+
+## Write about the product, never about the tools
+
+- **The people layer never mentions the documentation tools:** the scan, the fact pack, scripts, the "approved purpose", modules.yaml, tech-plugin. `plain.mjs` fails on them.
+- **Describe what the product does:** "Nothing in the product opens this page today", not "the scan found no caller".
+- **If the fact pack looks wrong** (it says nothing opens a page, but you can see a form that does), believe the code you read. Cite it, and say so in your reply to the orchestrator, not in the document.
+
 ## People-layer writing
 
 - **Plain words.** Sentences under 25 words. One idea per sentence.
@@ -50,7 +66,9 @@ Each document has two layers.
 
   Never guess a meaning as fact. A meaning shown in the product itself, such as a label or help text, may be cited.
 - **Examples.** Use real-sounding examples ("a doctor books a 30-minute slot"). Never use a real person's name, number or email.
-- **In short.** Keep its four lines. **Open questions: N** must equal the number of questions in the Open questions section.
+- **In short.** Keep its four lines. **Open questions: N** must equal the number of questions in this document's Open questions section. Write the key rules as short full sentences a reader understands alone: "A report opens only after the patient agrees to share it", not "consent first; tabs follow what was saved".
+- **Certainty in plain words.** Write "probably" or "it looks like" for an Inferred statement. Never write "(Inferred)" or other class names in the people layer.
+- **Plain verbs.** Say who does what: "the report shows the doctor who saw the patient", not "reports open under the visit's doctor".
 
 ## IDs
 

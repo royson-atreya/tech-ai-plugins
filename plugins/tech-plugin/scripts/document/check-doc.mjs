@@ -145,7 +145,7 @@ export function checkDoc(file, home) {
     if (!t || /^>/.test(t) || /^#{1,6} /.test(t) || /^<!--/.test(t) || /^\|?\s*:?-{3,}/.test(t) || /^none( yet)?\.?$/i.test(t) || /^\*\*[^*]+\*\*:?$/.test(t)) continue;
     if (oq !== -1 && k > oq && !lines.slice(oq + 1, k).some((x) => /^## /.test(x))) continue; // the questions themselves
     if (/^\|/.test(t) && lines[k + 1] && /^\|?\s*:?-{3,}/.test(lines[k + 1].trim())) continue; // table header
-    if (!/\[(E|Q)\d+\]/.test(t)) untagged.push(`line ${k + 1 + off}: ${t.slice(0, 80)}`);
+    if (!/\[(?:(?:spec|brd) )?(E|Q)\d+\]/.test(t)) untagged.push(`line ${k + 1 + off}: ${t.slice(0, 80)}`);
   }
   add(untagged.length ? 'FAIL' : 'PASS', 'every fact in the people layer has an [E#] or [Q#] tag', untagged.slice(0, 15).concat(untagged.length > 15 ? [`… and ${untagged.length - 15} more`] : []));
 
@@ -170,10 +170,18 @@ export function checkDoc(file, home) {
     for (const m of l.matchAll(/\[(E|Q)(\d+)\]/g)) (m[1] === 'E' ? usedE : usedQ).add(`${m[1]}${m[2]}`);
   });
   for (const d of defs.values()) for (const m of (d.source || '').matchAll(/\bQ(\d+)\b/g)) usedQ.add(`Q${m[1]}`);
+  // [spec Q6] / [brd Q2]: a question asked once, in an earlier document
+  const crossBad = [];
+  for (const m of parts.body.matchAll(/\[(spec|brd) (Q|E)(\d+)\]/g)) {
+    const f = path.join(docsDir(home), docRel(id, m[1]));
+    const t = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
+    const there = m[2] === 'Q' ? new RegExp(`^- \\*\\*Q${m[3]}\\*\\*`, 'm').test(t) : new RegExp(`^\\|\\s*E${m[3]}\\s*\\|`, 'm').test(t);
+    if (!there && !crossBad.includes(m[0])) crossBad.push(m[0]);
+  }
   const undefinedE = [...usedE].filter((e) => !defs.has(e));
   const undefinedQ = [...usedQ].filter((q) => !qs.includes(Number(q.slice(1))));
   const unusedE = [...defs.keys()].filter((e) => !usedE.has(e));
-  const tagProblems = [...defProblems, ...undefinedE.map((e) => `${e} is used but not in Appendix A`), ...undefinedQ.map((q) => `${q} is used but not in Open questions`)];
+  const tagProblems = [...defProblems, ...undefinedE.map((e) => `${e} is used but not in Appendix A`), ...undefinedQ.map((q) => `${q} is used but not in Open questions`), ...crossBad.map((x) => `${x} points at nothing in that document`)];
   add(tagProblems.length ? 'FAIL' : 'PASS', `every tag resolves (${defs.size} evidence rows, ${qs.length} questions)`, tagProblems.slice(0, 20));
   if (unusedE.length) add('WARN', 'evidence rows no statement uses', [unusedE.join(', ')]);
 
@@ -192,7 +200,7 @@ export function checkDoc(file, home) {
       for (let k = i + 1; k < bodyLines.length && !/^#{2,3} /.test(bodyLines[k]); k++) blk.push(bodyLines[k]);
       const b = blk.join('\n');
       if (!/\*\*Acceptance criteria\*\*/.test(b) || !/^- (Given|When)\b/im.test(b)) bad.push(`${h[1]}: needs **Acceptance criteria** with Given/when/then lines`);
-      if (!/\*\*Evidence:\*\*.*\[(E|Q)\d+\]/.test(b)) bad.push(`${h[1]}: needs an **Evidence:** line with tags`);
+      if (!/\*\*Evidence:\*\*.*\[(?:(?:spec|brd) )?(E|Q)\d+\]/.test(b)) bad.push(`${h[1]}: needs an **Evidence:** line with tags`);
     }
     if (!ids.length) add('FAIL', `requirements ${P}-Rnn present`, ['no "### ' + P + '-R01: …" headings']);
     else add(dup.length || bad.length ? 'FAIL' : 'PASS', `${ids.length} requirements ${P}-Rnn: unique, each with acceptance criteria and evidence`, [...dup.map((d) => `${d} is defined twice`), ...bad]);

@@ -22,12 +22,12 @@ import { bodyHash, splitDoc } from '../lib/frontmatter.mjs';
 import { toYaml } from '../lib/yaml.mjs';
 import { redact } from '../lib/redact.mjs';
 import { makeReader } from '../lib/stacks.mjs';
-import { listFiles, sourceCache, uniq } from '../lib/readers/common.mjs';
+import { listFiles, normUri, shapeOf, sourceCache, uniq } from '../lib/readers/common.mjs';
 import { bladeLabels, genericMessages, laravelBehaviour, loadLang } from '../lib/readers/behaviour.mjs';
 import { PLUGIN_ROOT, docsDir, fail, isSecretFor, parseArgs, readJson, real, today, writeDocs } from '../breakdown/common.mjs';
 import { loadLinks, loadSystem } from '../breakdown/load.mjs';
 import { loadExisting } from '../breakdown/modules.mjs';
-import { loadState } from '../breakdown/state.mjs';
+import { loadState, status as breakdownStatus } from '../breakdown/state.mjs';
 
 export const DOCS_ORDER = ['spec', 'brd', 'prd'];
 export const NEEDS = { spec: [], brd: ['spec'], prd: ['spec', 'brd'] };
@@ -145,7 +145,10 @@ export function buildFacts(home, id) {
       });
       // a page people open in the browser is in use even when no code calls it
       const page = (usage && usage.page) || (r.method === 'GET' && (r.surface === 'page' || r.kind === 'view' || a.screens.some((s) => (s.renderedBy || []).includes(r.handler))));
-      if ((!usage || !usage.count) && !page) pack.notCalled.push(`${appId}|${r.key}`);
+      const linkedFrom = a.screens.filter((s) => (s.links || []).some((l) => (l.kind === 'route-name' && r.name && l.target === r.name) || (l.kind === 'url' && shapeOf(normUri(l.target)) === r.shape && (!l.method || l.method === r.method)))).map((s) => s.id);
+      pack.routes[pack.routes.length - 1].linkedFrom = linkedFrom.slice(0, 10);
+      if (linkedFrom.length) allTexts.push(r.uri);
+      if ((!usage || !usage.count) && !page && !linkedFrom.length) pack.notCalled.push(`${appId}|${r.key}`);
       allTexts.push(r.uri);
     }
     // screens
@@ -192,8 +195,8 @@ export function factsMd(p) {
     if (s.calls.length) L.push(`- **Asks for data:** ${s.calls.slice(0, 20).map((c) => `${c.method} \`${esc(c.uri)}\` (${c.status}${c.route ? ` -> ${c.route.key}` : ''}) \`${c.cite}\``).join('; ')}`);
     L.push('');
   }
-  L.push(`## Routes (${p.routes.length})`, '', '| Method | Path | Handler | Access | Called by apps | Source |', '|---|---|---|---|---|---|');
-  for (const r of p.routes) L.push(`| ${r.method} | \`${esc(r.uri)}\` | ${esc((r.handler || '').split('\\').pop())} | ${esc(r.middleware.join(', ') || 'none')} | ${r.calledBy} | \`${r.cite}\` |`);
+  L.push(`## Routes (${p.routes.length})`, '', '| Method | Path | Handler | Access | Called by apps | Opened from pages | Source |', '|---|---|---|---|---|---|---|');
+  for (const r of p.routes) L.push(`| ${r.method} | \`${esc(r.uri)}\` | ${esc((r.handler || '').split('\\').pop())} | ${esc(r.middleware.join(', ') || 'none')} | ${r.calledBy} | ${esc((r.linkedFrom || []).join(', '))} | \`${r.cite}\` |`);
   L.push('');
   const withBeh = p.routes.filter((r) => r.rules.length || r.messages.length || r.asksBackend.length);
   if (withBeh.length) {
@@ -268,9 +271,10 @@ export function status(home, id, { force = false } = {}) {
   const firstStale = DOCS_ORDER.find((d) => docs[d].state === 'facts-changed');
   const was = firstStale ? readJson(path.join(docsDir(home), '_state', 'docs', id, `${firstStale}.facts.json`)) : null;
   const factsChanges = was ? summarizeChange(was, pack) : old && changed ? summarizeChange(old, pack) : [];
+  const bd = breakdownStatus(home);
   const stx = loadState(home);
   const repos = Object.fromEntries(((stx && stx.repos) || []).map((r) => [r.name, path.resolve(home, r.path)]));
-  return { module: id, name: m.name, critical: !!m.critical, deep: pack.module.deep, repos, scripts: path.join(PLUGIN_ROOT, 'scripts', 'document'), writer: pack.module.deep ? 'tech-plugin:doc-writer-deep' : 'tech-plugin:doc-writer', checker: pack.module.deep ? 'tech-plugin:doc-checker-deep' : 'tech-plugin:doc-checker', checkerPasses: pack.module.deep ? 2 : 1, facts: { hash: pack.hash, md: path.join(docsDir(home), 'modules', id, '_facts.md'), routes: pack.routes.length, screens: pack.screens.length, changes: factsChanges }, docs, next, message: next === 'up-to-date' ? `Already up to date: spec, BRD and PRD of ${id} match the code.` : `${next}: ${docs[next].state}` };
+  return { module: id, name: m.name, breakdown: { upToDate: bd.next === 'up-to-date', next: bd.next, message: bd.message }, critical: !!m.critical, deep: pack.module.deep, repos, scripts: path.join(PLUGIN_ROOT, 'scripts', 'document'), writer: pack.module.deep ? 'tech-plugin:doc-writer-deep' : 'tech-plugin:doc-writer', checker: pack.module.deep ? 'tech-plugin:doc-checker-deep' : 'tech-plugin:doc-checker', checkerPasses: pack.module.deep ? 2 : 1, facts: { hash: pack.hash, md: path.join(docsDir(home), 'modules', id, '_facts.md'), routes: pack.routes.length, screens: pack.screens.length, changes: factsChanges }, docs, next, message: next === 'up-to-date' ? `Already up to date: spec, BRD and PRD of ${id} match the code.` : `${next}: ${docs[next].state}` };
 }
 
 function summarizeChange(a, b) {
