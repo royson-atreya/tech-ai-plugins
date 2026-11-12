@@ -27,6 +27,7 @@ Arguments: `$ARGUMENTS`. Scripts: `${CLAUDE_PLUGIN_ROOT}/scripts/document/`.
    node "${CLAUDE_PLUGIN_ROOT}/scripts/document/doc.mjs" status <module> --home <home>
    ```
 
+   - **`next` is `restart`:** reply with `message` and stop. A newer tech-plugin is installed than this session runs.
    - **A document is `missing`:** say "Write it first: /tech-plugin:document <module>" and stop.
    - **A document is `facts-changed` or `input-changed`:** say that it must be rewritten first, and stop.
 2. **Check each document** (`spec`, `brd`, `prd`, or the one given) by following `${CLAUDE_PLUGIN_ROOT}/references/document/validate-flow.md`.

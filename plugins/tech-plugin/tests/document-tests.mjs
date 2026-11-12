@@ -19,6 +19,7 @@ import { parseYaml } from '../scripts/lib/yaml.mjs';
 import { redact, scanText } from '../scripts/lib/redact.mjs';
 import { bodyHash, joinDoc, splitDoc } from '../scripts/lib/frontmatter.mjs';
 import { bladeLabels } from '../scripts/lib/readers/behaviour.mjs';
+import { pluginUpdate, runningVersion } from '../scripts/lib/version.mjs';
 
 const D = buildDocSystem();
 const { G, H } = D;
@@ -617,6 +618,31 @@ describe('sign-off: critical module (money)', () => {
     const r = run('signoff.mjs', ['decide', 'payments', '--doc', 'spec', '--q', 'Q9', '--answer', 'x', '--by', 'A', '--role', 'PO', '--home', H]);
     assert.equal(r.code, 1);
     assert.match(r.err, /Q9 is not an open question in spec\.md/);
+  });
+});
+
+describe('a newer plugin installed than the session runs', () => {
+  const fakeHome = (v) => {
+    const h = path.join(G.W, `home-${v}`);
+    fs.mkdirSync(path.join(h, '.claude', 'plugins'), { recursive: true });
+    fs.writeFileSync(path.join(h, '.claude', 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'tech-plugin@tech-ai-plugins': [{ scope: 'user', version: v }] } }));
+    return h;
+  };
+  const cur = runningVersion(PLUGIN);
+  test('same or older installed: nothing to say', () => {
+    assert.equal(pluginUpdate(PLUGIN, fakeHome(cur)), null);
+    assert.equal(pluginUpdate(PLUGIN, fakeHome('0.0.1')), null);
+    assert.equal(pluginUpdate(PLUGIN, path.join(G.W, 'no-home')), null);
+  });
+  test('newer installed: breakdown, document and prepare stop and ask for a new session', () => {
+    const h = fakeHome('99.0.0');
+    assert.match(pluginUpdate(PLUGIN, h).message, new RegExp(`tech-plugin v99\\.0\\.0 is installed, but this session still runs v${cur.replace(/\./g, '\\.')}\\. Quit Claude Code and start a new session`));
+    const b = JSON.parse(ok(runScript('breakdown', 'state.mjs', ['status', '--cwd', H], { HOME: h })));
+    assert.equal(b.next, 'restart');
+    assert.equal(json(run('doc.mjs', ['status', 'patients', '--home', H], { HOME: h })).next, 'restart');
+    const p = run('doc.mjs', ['prepare', 'patients', 'spec', '--home', H], { HOME: h });
+    assert.equal(p.code, 1);
+    assert.match(p.err, /start a new session/);
   });
 });
 

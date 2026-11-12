@@ -31,6 +31,7 @@ Where the run stands:
 ## What to do
 
 1. **Pick the stage.**
+   - **`next` is `restart`:** reply with the status `message` and stop. A newer tech-plugin is installed than this session runs.
    - **`--only N`:** run stage N.
    - **Otherwise:** use `next` from the status above, then carry on stage after stage.
    - **`next` is `up-to-date` and there is no `--refresh`:** reply with the status `message`, point to `sdlc-docs/modules/README.md`, and stop.

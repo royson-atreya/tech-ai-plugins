@@ -13,6 +13,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DOCS, commitOf, fail, fingerprint, parseArgs, readJson, real, repoRoot, writeDocs } from './common.mjs';
 import { READERS_VERSION, codeTree } from './load.mjs';
+import { pluginUpdate } from '../lib/version.mjs';
+import { PLUGIN_ROOT } from './common.mjs';
 
 export const STATE_REL = path.join('_state', 'breakdown.json');
 
@@ -74,6 +76,8 @@ const same = (a, b) => JSON.stringify(a || {}) === JSON.stringify(b || {});
 //   changed      the repo's manifests changed since stage 2 (profile is stale)
 //   codeChanged  the repo's code changed since stage 3 read it
 export function status(cwd) {
+  const upd = pluginUpdate(PLUGIN_ROOT);
+  if (upd) return { found: null, next: 'restart', pluginUpdate: upd, message: upd.message };
   const home = findHome(cwd);
   if (!home) return { found: false, next: 1, message: 'No breakdown yet: start with stage 1.' };
   const st = loadState(home);

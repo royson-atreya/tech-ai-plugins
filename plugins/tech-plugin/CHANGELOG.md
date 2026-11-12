@@ -2,6 +2,12 @@
 
 All notable changes to tech-plugin. Versions follow semantic versioning; the version is set only in `.claude-plugin/plugin.json`.
 
+## 0.4.2 (2026-11-12)
+
+### Added
+
+- **`breakdown`, `document` and `validate` stop when a newer tech-plugin is installed than the session runs.** After `/plugin update` in an open session, Claude Code keeps running the old copy, and a command can quietly give old results ("already up to date"). They now say "Quit Claude Code and start a new session" instead (`scripts/lib/version.mjs`).
+
 ## 0.4.1 (2026-11-11)
 
 Fixes from reviewing the first real documents (the Frontend's `reports` module).

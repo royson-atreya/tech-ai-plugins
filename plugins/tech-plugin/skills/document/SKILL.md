@@ -30,6 +30,7 @@ Arguments: `$ARGUMENTS`. Scripts: `${CLAUDE_PLUGIN_ROOT}/scripts/document/`.
    ```
 
    It rebuilds the fact pack and returns, per document (`spec`, `brd`, `prd`), the `state` (missing, up-to-date, facts-changed, input-changed), the `next` document, and the `writer` agent.
+   - **`next` is `restart`:** reply with `message` and stop. A newer tech-plugin is installed than this session runs.
    - **`breakdown.upToDate` is false:** the code facts are older than the code or the plugin. Say "Run /tech-plugin:breakdown first (`breakdown.message`)" and stop.
    - **`next` is `up-to-date` and no `--force`:** reply with `message` and stop.
    - **`facts-changed`:** say in one line what changed (`facts.changes`), then rebuild that document.

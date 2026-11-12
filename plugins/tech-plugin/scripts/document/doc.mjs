@@ -20,6 +20,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bodyHash, splitDoc } from '../lib/frontmatter.mjs';
 import { toYaml } from '../lib/yaml.mjs';
+import { pluginUpdate } from '../lib/version.mjs';
 import { redact } from '../lib/redact.mjs';
 import { makeReader } from '../lib/stacks.mjs';
 import { listFiles, normUri, shapeOf, sourceCache, uniq } from '../lib/readers/common.mjs';
@@ -250,6 +251,8 @@ function docInfo(home, id, doc) {
 }
 
 export function status(home, id, { force = false } = {}) {
+  const upd = pluginUpdate(PLUGIN_ROOT);
+  if (upd) return { module: id, next: 'restart', pluginUpdate: upd, message: upd.message };
   const { m } = moduleOf(home, id);
   const { pack, changed, old } = writeFacts(home, id);
   const docs = {};
@@ -303,6 +306,7 @@ export function idsIn(text, doc, id) {
 export function prepare(home, id, doc) {
   if (!DOCS_ORDER.includes(doc)) fail(`unknown document "${doc}" (spec, brd or prd)`);
   const st = status(home, id, { force: true });
+  if (st.pluginUpdate) fail(st.message);
   const missing = NEEDS[doc].filter((n) => st.docs[n].state === 'missing');
   if (missing.length) fail(`${doc} is written from ${missing.join(' and ')}, which does not exist yet: write ${missing.join(', then ')} first`);
   const { my } = moduleOf(home, id);
