@@ -1,6 +1,6 @@
 {
   "name": "tech-plugin",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "SDLC/STLC toolbox for any software project, with a fail-closed safety guard: secrets blocked, repos read-only until a work item is approved, git read-only, production hosts blocked, Zoho Sprints writes confirmed.",
   "author": {
     "name": "Royson Gonsalves"

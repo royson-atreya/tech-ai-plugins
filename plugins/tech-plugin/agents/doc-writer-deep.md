@@ -20,7 +20,9 @@ You write one document for one **critical** module of a product: it moves money,
   - `idPrefix`;
   - `glossary`;
   - `checks`: the two commands to run;
-- for a fix pass: a check report, or a readability review, to address.
+  - `knownIssues`: leftovers from the last validate, to fix in this rewrite (or null);
+- for a fix pass: a check report, or a readability review, to address;
+- for a refresh: a changes file (`_state/docs/<module>/<doc>.changes.md`) showing what changed in the spec or BRD.
 
 ## How to work
 
@@ -41,6 +43,9 @@ You write one document for one **critical** module of a product: it moves money,
    - **Readability item:** rewrite it in plain words.
 
    Change only what the report names. Then run the checks again.
+7. **For a refresh:** read the changes file. Update only the lines of this document that depend on a changed part: the same rule or message, a `spec E#` or `[spec Q#]` it cites, a BR. Keep every other line exactly as it is, so the checks already done still hold. If nothing depends on the change, change nothing and say so.
+8. **In a fix or a refresh, state only what the code shows.** A code value's meaning (a status of 1, a flag, a column) is fact only when a label, message or help text in the product says it. Otherwise write "probably" and how you know, or ask a question. Don't swap one unproven wording for another.
+9. **With `knownIssues`:** fix every item on that list in the rewrite.
 
 ## Never
 

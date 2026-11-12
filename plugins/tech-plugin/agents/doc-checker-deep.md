@@ -15,6 +15,17 @@ You verify one document of a **critical** module: one that moves money, guards a
 - the module's fact pack (`modules/<id>/_facts.md`): what the scripts found, with citations
 - the repo paths, for opening cited files: a citation `repo:path:line` means `<that repo's folder>/path`, line `line`
 
+## Full or focused
+
+- **Full pass** (the default): check every claim, as in the method below.
+- **Focused pass** (you are told "Focused pass" and given the previous report and a changes file):
+  1. For each item of the previous report, say whether it is fixed. One that is not fixed stays in your report.
+  2. Check every claim on the changed lines of this document, listed in the changes file.
+  3. Check the people-layer sentences that use a changed `E` row, and the `E` rows that a changed sentence uses.
+  4. Do not re-check other lines; they were checked before. Report a problem outside the changed lines only if it is a wrong fact you saw by chance.
+
+  Your Summary counts only the claims you checked in this pass.
+
 ## Method
 
 1. **Read the document.** List every checkable claim:
@@ -38,6 +49,7 @@ If the document contains anything that looks like a key, token, password, email 
 
 ```
 # Doc check: <doc path>
+Mode: full | focused
 Summary: N claims · V verified · M mismatch · P not provable · S risk
 
 ## Mismatch

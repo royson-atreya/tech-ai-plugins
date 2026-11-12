@@ -613,11 +613,118 @@ describe('sign-off: critical module (money)', () => {
     assert.equal(splitDoc(fs.readFileSync(S('modules/payments/spec.md'), 'utf8')).front.status, 'Approved');
     ok(run('doc.mjs', ['facts', 'payments', '--home', H]));
     assert.match(fs.readFileSync(S('modules/payments/_facts.md'), 'utf8'), /\*\*D1\*\* \(spec Q1, Asha Rao \(PO\), \d{4}-\d{2}-\d{2}\): No, only from the web dashboard/);
+    // an answer is not a code change: the spec is not "facts-changed" and still passes
+    assert.equal(json(run('doc.mjs', ['status', 'payments', '--home', H])).docs.spec.state, 'up-to-date');
+    assert.match(ok(check(S('modules/payments/spec.md'))), /check-doc: PASS/);
   });
   test('a decision on a question that does not exist is refused', () => {
     const r = run('signoff.mjs', ['decide', 'payments', '--doc', 'spec', '--q', 'Q9', '--answer', 'x', '--by', 'A', '--role', 'PO', '--home', H]);
     assert.equal(r.code, 1);
     assert.match(r.err, /Q9 is not an open question in spec\.md/);
+  });
+});
+
+describe('validate rounds: pass limit, focused passes, spec first, known issues, changes, restamp', () => {
+  const LEFT = '# Doc check\nSummary: 30 claims · 28 verified · 1 mismatch · 1 not provable · 0 risk\n\n## Mismatch\n| # | Doc line | Claim (short quote) | What the source shows | Source |\n|---|---|---|---|---|\n| 1 | 12 | "only" | too strong | `backend:routes/api.php:13` |\n\n## Not provable\n| # | Doc line | Claim | Why | Suggested fix |\n|---|---|---|---|---|\n| 1 | 20 | "tab title" | not cited | cite it |\n\n## Risk\nNone.\n';
+  const RISKY = '# Doc check\nSummary: 30 claims · 29 verified · 0 mismatch · 0 not provable · 1 risk\n';
+  const save = (doc, txt, mode = 'full') => run('signoff.mjs', ['save-check', 'payments', doc, '--input', report(txt), '--home', H, '--mode', mode]);
+  const st = () => json(run('signoff.mjs', ['status', 'payments', '--home', H]));
+  const specF = () => S('modules/payments/spec.md');
+  test('the third pass is the last; a fourth is refused and points to known issues', () => {
+    assert.match(ok(save('spec', LEFT)), /spec-check-3\.md: 1 mismatch, 1 not provable, 0 risk; no more passes this round/);
+    const r = save('spec', CLEAN);
+    assert.equal(r.code, 1);
+    assert.match(r.err, /already has 3 doc-checker passes this round \(the limit is 3\)[\s\S]*signoff\.mjs known payments spec/);
+    assert.match(approve('spec', 'technical', 'developer', 'payments').err, /record them as known issues/);
+  });
+  test('known issues: the leftovers are recorded with the text; approval accepts them and says so', () => {
+    assert.match(ok(run('signoff.mjs', ['known', 'payments', 'spec', '--home', H])), /recorded 2 known issue\(s\) in modules\/payments\/checks\/spec-known\.md: 1 mismatch, 1 not provable/);
+    const k = fs.readFileSync(S('modules/payments/checks/spec-known.md'), 'utf8');
+    assert.match(k, /\| 1 \| 12 \| "only" \| too strong \|/);
+    assert.match(k, /\| 1 \| 20 \| "tab title" \| not cited \|/);
+    assert.equal(st().spec.settled, true);
+    assert.match(ok(approve('spec', 'technical', 'developer', 'payments')), /accepted 2 known issue\(s\) \(modules\/payments\/checks\/spec-known\.md\)/);
+    assert.match(fs.readFileSync(S('modules/payments/checks/review-checklist.md'), 'utf8'), /pass 3: 1 mismatch, 1 not provable; \[2 known issue\(s\)\]\(spec-known\.md\)/);
+  });
+  test('a clean last pass has nothing to record', () => {
+    const r = run('signoff.mjs', ['known', 'patients', 'spec', '--home', H]);
+    assert.equal(r.code, 1);
+    assert.match(r.err, /the last pass is clean: there is nothing to record/);
+  });
+  let brd;
+  test('the BRD is stamped from the spec; a spec change makes its pass wait for a refresh', () => {
+    brd = writeDoc('brd', BRD_BODY.replace(/^# Patients/m, '# Payments'), 'payments');
+    fs.writeFileSync(specF(), fs.readFileSync(specF(), 'utf8').replace('Doctors open the patient list after they sign in. [E1]', 'Doctors open the patient list once they sign in. [E1]'));
+    const r = save('brd', CLEAN);
+    assert.equal(r.code, 1);
+    assert.match(r.err, /brd\.md was written from an older spec\.md\. Refresh it first: doc\.mjs changes payments brd/);
+    assert.equal(json(run('doc.mjs', ['status', 'payments', '--home', H])).docs.brd.state, 'input-changed');
+  });
+  test('restamp is refused until the changes were looked at', () => {
+    const r = run('doc.mjs', ['restamp', 'payments', 'brd', '--home', H]);
+    assert.equal(r.code, 1);
+    assert.match(r.err, /run "doc\.mjs changes payments brd" first, and have the writer update the lines of brd\.md that depend on what changed in spec\.md/);
+    assert.match(run('doc.mjs', ['restamp', 'payments', 'spec', '--home', H]).err, /written from the code only/);
+  });
+  test('changes: the spec lines that changed since the BRD was stamped, with their IDs', () => {
+    const c = json(run('doc.mjs', ['changes', 'payments', 'brd', '--home', H]));
+    assert.equal(c.sinceCheck, null);
+    assert.deepEqual([c.inputs.spec.changed, c.inputs.spec.hunks, c.inputs.spec.ids], [true, 1, ['E1']]);
+    const md = fs.readFileSync(c.file, 'utf8');
+    const line = fs.readFileSync(specF(), 'utf8').split('\n').indexOf('- Doctors open the patient list once they sign in. [E1]') + 1;
+    assert.match(md, new RegExp(`### spec lines ${line} \\(was ${line}\\) · E1`));
+    assert.match(md, /Before:\n\n```text\n- Doctors open the patient list after they sign in\. \[E1\]\n```\n\nAfter:\n\n```text\n- Doctors open the patient list once they sign in\. \[E1\]/);
+  });
+  test('restamp records the current spec without touching the BRD text', () => {
+    const before = bodyHash(splitDoc(fs.readFileSync(brd.out, 'utf8')).body);
+    assert.match(json(run('doc.mjs', ['restamp', 'payments', 'brd', '--home', H])).message, /brd\.md is now stamped from the current spec\.md/);
+    assert.equal(bodyHash(splitDoc(fs.readFileSync(brd.out, 'utf8')).body), before);
+    assert.equal(json(run('doc.mjs', ['status', 'payments', '--home', H])).docs.brd.state, 'up-to-date');
+    assert.doesNotMatch(check(brd.out).out, /spec\.md changed since this was written/);
+    assert.equal(json(run('doc.mjs', ['restamp', 'payments', 'brd', '--home', H])).restamped, false);
+  });
+  test('spec first: the BRD waits while the changed spec is unchecked', () => {
+    const r = save('brd', CLEAN);
+    assert.equal(r.code, 1);
+    assert.match(r.err, /finish spec\.md first/);
+  });
+  test('a settled document that changes gets one focused pass, even past the limit', () => {
+    assert.match(save('spec', CLEAN).err, /had settled; a change after that gets one focused pass/);
+    const c = json(run('doc.mjs', ['changes', 'payments', 'spec', '--home', H]));
+    assert.equal(c.sinceCheck.hunks, 1);
+    assert.match(ok(save('spec', CLEAN, 'focused')), /spec-check-4\.md: 0 mismatch, 0 not provable, 0 risk \(clean\)/);
+    assert.match(fs.readFileSync(S('modules/payments/checks/spec-check-4.md'), 'utf8').split('\n')[0], /\*\*Pass:\*\* 4 · \*\*Mode:\*\* focused/);
+    assert.equal(st().spec.settled, true);
+    assert.equal(save('spec', CLEAN, 'focused').code, 1);
+  });
+  test('the first pass of a round reads everything; later ones may be focused on the changes', () => {
+    assert.match(save('brd', CLEAN, 'focused').err, /the first pass of a round reads the whole document/);
+    assert.match(ok(save('brd', LEFT)), /brd-check-1\.md: 1 mismatch, 1 not provable, 0 risk; 2 more pass\(es\) allowed this round/);
+    fs.writeFileSync(brd.out, fs.readFileSync(brd.out, 'utf8').replace('Only signed-in doctors reach the patient list. [E6]', 'Only doctors who signed in reach the patient list. [E6]'));
+    const c = json(run('doc.mjs', ['changes', 'payments', 'brd', '--home', H]));
+    const line = fs.readFileSync(brd.out, 'utf8').split('\n').indexOf('- Only doctors who signed in reach the patient list. [E6]') + 1;
+    assert.deepEqual([c.sinceCheck.pass, c.sinceCheck.lines], [1, [[line, line]]]);
+    assert.equal(c.inputs.spec.changed, false);
+    ok(save('brd', CLEAN, 'focused'));
+    assert.deepEqual([st().brd.round.passes, st().brd.round.full, st().brd.settled], [2, 1, true]);
+  });
+  test('a risk item is never accepted as a known issue', () => {
+    const p = writeDoc('prd', PRD_BODY.replace(/^# Patients/m, '# Payments'), 'payments');
+    assert.ok(p.out.endsWith('payments/prd.md'));
+    ok(save('prd', RISKY));
+    ok(save('prd', LEFT));
+    ok(save('prd', RISKY));
+    const r = run('signoff.mjs', ['known', 'payments', 'prd', '--home', H]);
+    assert.equal(r.code, 1);
+    assert.match(r.err, /risk item\(s\) \(a key or personal data\): those are never accepted/);
+  });
+  test('a rewrite starts a new round, hands the writer the known issues, and needs a new readability review', () => {
+    ok(run('signoff.mjs', ['save-review', 'payments', 'spec', '--input', report(REVIEW), '--home', H]));
+    assert.equal(st().spec.readability, true);
+    const pr = prep('spec', 'payments');
+    assert.equal(pr.knownIssues, S('modules/payments/checks/spec-known.md'));
+    const s = st().spec;
+    assert.deepEqual([s.round.passes, s.round.limit, s.readability, s.settled], [0, 3, false, false]);
   });
 });
 
@@ -701,6 +808,8 @@ describe('skills, agents and the guard', () => {
       assert.match(t, new RegExp(`^tools: ${tools}$`, 'm'));
     }
     assert.match(read('agents/doc-checker.md'), /Summary: N claims · V verified · M mismatch · P not provable · S risk/);
+    for (const f of ['doc-checker', 'doc-checker-deep']) assert.match(read(`agents/${f}.md`), /\*\*Focused pass\*\*[\s\S]*Do not re-check other lines/);
+    for (const f of ['doc-writer', 'doc-writer-deep']) assert.match(read(`agents/${f}.md`), /For a refresh:[\s\S]*A code value's meaning/);
     assert.match(read('agents/readability-reviewer.md'), /Could not follow: N/);
   });
   test('doctor lists the new commands', () => {

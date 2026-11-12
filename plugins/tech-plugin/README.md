@@ -2,7 +2,7 @@
 
 An SDLC/STLC toolbox for Claude Code that takes any software project from "understand what we have" to "release it safely", with a person approving every important step. Commands are `/tech-plugin:<command>`; each product repo gets its own notebook folder, `<repo>/sdlc-docs/`.
 
-**Status: 0.4.2, build step 5 of 11.** This version contains the safety guard, the session banner, `doctor`, `breakdown`, `document` and `validate`. The other commands come in later steps (see `docs/PLAN.md` in the marketplace repo).
+**Status: 0.4.3, build step 5 of 11.** This version contains the safety guard, the session banner, `doctor`, `breakdown`, `document` and `validate`. The other commands come in later steps (see `docs/PLAN.md` in the marketplace repo).
 
 ## Install from the local marketplace
 
@@ -148,11 +148,17 @@ Text from code is redacted for keys and personal data. The writer works from the
 - **`plain.mjs`:** code names, paths, HTTP codes or SQL in the people layer fail. Long sentences, jargon and domain words missing from the glossary are warnings.
 - **The agents:** the doc-checker re-reads every cited line (twice for critical modules); the readability reviewer lists what a non-technical reader could not follow.
 
+**How validate settles.**
+- **Spec first.** The BRD is checked only once the spec is settled, and the PRD once the BRD is. A settled document has a clean last check on its current text, or its leftovers recorded as known issues.
+- **At most 3 code checks per document per round.** A round starts when `/tech-plugin:document` writes the document. The first check reads everything. Later checks are *focused*: they look only at the items the last check raised and the lines changed since (`doc.mjs changes`).
+- **Known issues instead of endless passes.** What is left after the last pass goes to `checks/<doc>-known.md`. The developer who approves the technical layer accepts them, and the next rewrite fixes them. A key or personal data is never accepted.
+- **A spec fix doesn't mean rewriting the BRD and PRD.** The writer updates only the lines that depend on the changed spec lines, then `doc.mjs restamp` records the new spec. If nothing depended on the change, the earlier checks still count. A settled document that changes later gets one focused check.
+
 **Sign-off.** Only a person approves, by role:
 - the owner, PO or BA approves the people layer (Draft → Reviewed);
 - a developer approves the technical layer (→ Approved).
 
-A critical module also needs a recorded decision on every open question. A sign-off applies to one exact text: when the document changes, it no longer counts. `modules.yaml` `doc_status` follows: none → draft → reviewed → approved. Everything is listed in `modules/<id>/checks/review-checklist.md`.
+A critical module also needs a recorded decision on every open question. Answers never make a document out of date; the next rewrite cites them. A sign-off applies to one exact text: when the document changes, it no longer counts. `modules.yaml` `doc_status` follows: none → draft → reviewed → approved. Everything is listed in `modules/<id>/checks/review-checklist.md`.
 
 **Running it again.** If the code and the input documents are unchanged, it answers "Already up to date". If the code changed, it rebuilds the document and says what changed. If the spec changed after the BRD or PRD was written, it asks before rebuilding them. IDs and the person's decisions are kept.
 

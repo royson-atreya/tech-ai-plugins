@@ -10,7 +10,18 @@
 //   node doc.mjs prepare <module> <spec|brd|prd> --home HOME
 //                                                 JSON for the writer agent: paths, the stamp
 //                                                 to put on top, the IDs to keep; saves the
-//                                                 previous version
+//                                                 previous version, and starts a new round of
+//                                                 doc-checker passes
+//   node doc.mjs changes <module> <doc> --home HOME
+//                                                 what changed in this document since its last
+//                                                 doc-checker pass, and in its input documents
+//                                                 since it was stamped: writes
+//                                                 _state/docs/<id>/<doc>.changes.md
+//   node doc.mjs restamp <module> <brd|prd> --home HOME
+//                                                 after the writer updated the lines that depend
+//                                                 on a changed input: records the inputs'
+//                                                 current versions, without a rewrite (the
+//                                                 checks of an unchanged text still count)
 //
 // Scripts only: the same code gives the same fact pack, at no token cost.
 
@@ -18,7 +29,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bodyHash, splitDoc } from '../lib/frontmatter.mjs';
+import { bodyHash, joinDoc, splitDoc } from '../lib/frontmatter.mjs';
+import { idsInText, lineDiff } from '../lib/diff.mjs';
 import { toYaml } from '../lib/yaml.mjs';
 import { pluginUpdate } from '../lib/version.mjs';
 import { redact } from '../lib/redact.mjs';
@@ -39,6 +51,27 @@ export const docRel = (id, doc) => path.join('modules', id, `${doc}.md`);
 export const prevRel = (id, doc) => path.join('_state', 'docs', id, `${doc}.prev.md`);
 export const factsRelOf = (id) => path.join('modules', id, '_facts.json');
 export const decisionsRel = (id) => path.join('modules', id, 'checks', 'decisions.md');
+const stateRel = (id, name) => path.join('_state', 'docs', id, name);
+export const checkedRel = (id, doc) => stateRel(id, `${doc}.checked.md`);
+export const fromRel = (id, doc, input) => stateRel(id, `${doc}.from-${input}.md`);
+export const knownRel = (id, doc) => path.join('modules', id, 'checks', `${doc}-known.md`);
+
+// A round of doc-checker passes starts when the document is (re)written by
+// prepare. At most MAX_PASSES passes per round; after the document settles,
+// each later change gets one focused pass (signoff.mjs save-check).
+export const MAX_PASSES = 3;
+export function lastPassNo(home, id, doc) {
+  const d = path.join(docsDir(home), 'modules', id, 'checks');
+  if (!fs.existsSync(d)) return 0;
+  return Math.max(0, ...fs.readdirSync(d).map((f) => new RegExp(`^${doc}-check-(\\d+)\\.md$`).exec(f)).filter(Boolean).map((m) => Number(m[1])));
+}
+export function readRound(home, id, doc) {
+  const r = readJson(path.join(docsDir(home), stateRel(id, `${doc}.round.json`)));
+  return { fromPass: 0, limit: MAX_PASSES, startedAt: null, ...(r || {}) };
+}
+function writeRound(home, id, doc, r) {
+  writeDocs(home, stateRel(id, `${doc}.round.json`), JSON.stringify(r, null, 1) + '\n');
+}
 
 export function moduleOf(home, id) {
   const my = loadExisting(home);
@@ -173,7 +206,10 @@ export function buildFacts(home, id) {
   }
   pack.systemRoles = sysRoles;
   pack.words = domainWords(allTexts, glossary);
-  const hash = crypto.createHash('sha1').update(JSON.stringify(pack)).digest('hex').slice(0, 16);
+  // decisions are what people answered, not code: they ride in the pack for
+  // the next rewrite, but never make a document "facts-changed" (that would
+  // stop validate between one answer and the next sign-off)
+  const hash = crypto.createHash('sha1').update(JSON.stringify({ ...pack, decisions: [] })).digest('hex').slice(0, 16);
   pack.hash = hash;
   pack.builtAt = new Date().toISOString();
   return pack;
@@ -319,7 +355,13 @@ export function prepare(home, id, doc) {
     prevIds = idsIn(t, doc, id);
   }
   const inputs = {};
-  for (const n of NEEDS[doc]) inputs[n] = docInfo(home, id, n).hash;
+  for (const n of NEEDS[doc]) {
+    inputs[n] = docInfo(home, id, n).hash;
+    writeDocs(home, fromRel(id, doc, n), fs.readFileSync(path.join(D, docRel(id, n)), 'utf8'));
+  }
+  // a rewrite starts a new round of doc-checker passes
+  writeRound(home, id, doc, { fromPass: lastPassNo(home, id, doc), limit: MAX_PASSES, startedAt: new Date().toISOString() });
+  const known = path.join(D, knownRel(id, doc));
   // the fact pack this document is written from, to say later what changed
   writeDocs(home, path.join('_state', 'docs', id, `${doc}.facts.json`), fs.readFileSync(path.join(D, factsRelOf(id)), 'utf8'));
   const front = {
@@ -348,22 +390,124 @@ export function prepare(home, id, doc) {
     glossary: path.join(D, 'glossary.md'),
     stamp: stampText,
     keepIds: prevIds,
+    knownIssues: fs.existsSync(known) ? known : null,
     idPrefix: doc === 'prd' ? `${id.toUpperCase()}-R` : doc === 'brd' ? 'BR-' : null,
     checks: [`node "${path.join(PLUGIN_ROOT, 'scripts', 'document', 'check-doc.mjs')}" "${out}" --home "${home}"`, `node "${path.join(PLUGIN_ROOT, 'scripts', 'document', 'plain.mjs')}" "${out}" --home "${home}"`],
   };
 }
 
+// ------------------------------------------------------------------ changes and restamp
+
+const bodyOf = (text) => splitDoc(text).body;
+// lines before the body (the stamp), so diff line numbers are file line numbers
+const offsetOf = (text) => text.split('\n').length - bodyOf(text).split('\n').length;
+
+function hunksBetween(oldText, newText) {
+  const off = offsetOf(newText);
+  const offOld = offsetOf(oldText);
+  return lineDiff(bodyOf(oldText).split('\n'), bodyOf(newText).split('\n')).map((h) => ({
+    lines: [h.bStart + off, h.bEnd + off],
+    was: [h.aStart + offOld, h.aEnd + offOld],
+    before: h.a,
+    after: h.b,
+    ids: idsInText([...h.a, ...h.b].join('\n')),
+  }));
+}
+
+const MAX_SHOWN = 40;
+function hunkMd(h, label) {
+  const range = (r) => (r[1] < r[0] ? `none (at ${r[0]})` : r[0] === r[1] ? `${r[0]}` : `${r[0]}-${r[1]}`);
+  const cut = (ls) => (ls.length > MAX_SHOWN ? [...ls.slice(0, MAX_SHOWN), `… ${ls.length - MAX_SHOWN} more lines`] : ls);
+  const L = [`### ${label} lines ${range(h.lines)} (was ${range(h.was)})${h.ids.length ? ` · ${h.ids.join(', ')}` : ''}`, ''];
+  if (h.before.length) L.push('Before:', '', '```text', ...cut(h.before), '```', '');
+  if (h.after.length) L.push('After:', '', '```text', ...cut(h.after), '```', '');
+  return L;
+}
+
+export function changes(home, id, doc) {
+  if (!DOCS_ORDER.includes(doc)) fail(`unknown document "${doc}" (spec, brd or prd)`);
+  moduleOf(home, id);
+  const D = docsDir(home);
+  const f = path.join(D, docRel(id, doc));
+  if (!fs.existsSync(f)) fail(`modules/${id}/${doc}.md does not exist`);
+  const text = fs.readFileSync(f, 'utf8');
+  const d = docInfo(home, id, doc);
+  const out = { module: id, doc, file: path.join(D, stateRel(id, `${doc}.changes.md`)), sinceCheck: null, inputs: {} };
+  const L = [`# Changes: ${doc}.md of ${id}`, '', `Written by doc.mjs changes on ${today()}. Line numbers are lines of the files as they are now; "was" gives the old lines.`, ''];
+  // 1. this document since its last doc-checker pass
+  const pass = lastPassNo(home, id, doc);
+  const checked = path.join(D, checkedRel(id, doc));
+  L.push(`## ${doc}.md since doc-checker pass ${pass || '(none)'}`, '');
+  if (!pass) L.push('No doc-checker pass yet: the first pass reads the whole document.', '');
+  else if (!fs.existsSync(checked)) {
+    out.sinceCheck = { pass, known: false };
+    L.push('No copy of the checked text was kept (checked before tech-plugin 0.4.3): run a full pass.', '');
+  } else {
+    const hs = hunksBetween(fs.readFileSync(checked, 'utf8'), text);
+    out.sinceCheck = { pass, known: true, hunks: hs.length, lines: hs.map((h) => h.lines) };
+    if (!hs.length) L.push('No change.', '');
+    for (const h of hs) L.push(...hunkMd(h, doc));
+  }
+  // 2. the documents this one is written from, since it was stamped
+  for (const n of NEEDS[doc]) {
+    const nd = docInfo(home, id, n);
+    if (!nd.exists) continue;
+    const changed = !d.front || !d.front.inputs || d.front.inputs[n] !== nd.hash;
+    const snap = path.join(D, fromRel(id, doc, n));
+    L.push(`## ${n}.md since ${doc}.md was stamped`, '');
+    if (!changed) {
+      out.inputs[n] = { changed: false };
+      L.push('No change.', '');
+    } else if (!fs.existsSync(snap)) {
+      out.inputs[n] = { changed: true, known: false };
+      L.push(`${n}.md changed, but no copy of the version ${doc}.md was written from was kept (written before tech-plugin 0.4.3). Compare ${doc}.md with the whole of ${n}.md.`, '');
+    } else {
+      const hs = hunksBetween(fs.readFileSync(snap, 'utf8'), fs.readFileSync(path.join(D, docRel(id, n)), 'utf8'));
+      out.inputs[n] = { changed: true, known: true, hunks: hs.length, ids: uniq(hs.flatMap((h) => h.ids)) };
+      if (!hs.length) L.push('Only the stamp changed.', '');
+      for (const h of hs) L.push(...hunkMd(h, n));
+    }
+  }
+  writeDocs(home, stateRel(id, `${doc}.changes.md`), L.join('\n'));
+  writeDocs(home, stateRel(id, `${doc}.changes.json`), JSON.stringify({ at: new Date().toISOString(), docHash: d.hash, inputs: Object.fromEntries(NEEDS[doc].map((n) => [n, docInfo(home, id, n).hash || null])) }, null, 1) + '\n');
+  return out;
+}
+
+export function restamp(home, id, doc) {
+  if (!DOCS_ORDER.includes(doc)) fail(`unknown document "${doc}" (spec, brd or prd)`);
+  if (!NEEDS[doc].length) fail(`${doc} is written from the code only: there is nothing to restamp`);
+  const st = status(home, id);
+  if (st.pluginUpdate) fail(st.message);
+  const D = docsDir(home);
+  const f = path.join(D, docRel(id, doc));
+  if (!fs.existsSync(f)) fail(`modules/${id}/${doc}.md does not exist`);
+  const text = fs.readFileSync(f, 'utf8');
+  const p = splitDoc(text);
+  const front = p.front || {};
+  if (front.facts !== st.facts.hash) fail(`the code facts changed since ${doc}.md was written: rewrite it with /tech-plugin:document ${id} ${doc}`);
+  const now = Object.fromEntries(NEEDS[doc].map((n) => [n, docInfo(home, id, n).hash]));
+  const stale = NEEDS[doc].filter((n) => !front.inputs || front.inputs[n] !== now[n]);
+  if (!stale.length) return { doc, restamped: false, message: `${doc}.md is already stamped from the current ${NEEDS[doc].join(' and ')}` };
+  const seen = readJson(path.join(D, stateRel(id, `${doc}.changes.json`)));
+  if (!seen || NEEDS[doc].some((n) => seen.inputs[n] !== now[n])) fail(`run "doc.mjs changes ${id} ${doc}" first, and have the writer update the lines of ${doc}.md that depend on what changed in ${stale.join(' and ')}.md`);
+  fs.writeFileSync(f, joinDoc({ ...front, inputs: now }, p.body));
+  for (const n of NEEDS[doc]) writeDocs(home, fromRel(id, doc, n), fs.readFileSync(path.join(D, docRel(id, n)), 'utf8'));
+  return { doc, restamped: true, inputs: now, message: `${doc}.md is now stamped from the current ${stale.join(' and ')}.md` };
+}
+
 function main() {
   const [cmd, id, third] = process.argv.slice(2);
   const a = parseArgs(process.argv.slice(3), ['force']);
-  if (!a.home || !id) fail('usage: doc.mjs <facts|status|prepare> <module> [spec|brd|prd] --home HOME [--force]');
+  if (!a.home || !id) fail('usage: doc.mjs <facts|status|prepare|changes|restamp> <module> [spec|brd|prd] --home HOME [--force]');
   const home = real(a.home);
   if (cmd === 'facts') {
     const r = writeFacts(home, id);
     process.stdout.write(`wrote modules/${id}/_facts.md: ${r.pack.routes.length} routes, ${r.pack.screens.length} screens, ${r.pack.tables.length} tables (facts ${r.pack.hash})\n`);
   } else if (cmd === 'status') process.stdout.write(JSON.stringify(status(home, id, { force: !!a.force }), null, 2) + '\n');
   else if (cmd === 'prepare') process.stdout.write(JSON.stringify(prepare(home, id, third), null, 2) + '\n');
-  else fail('usage: doc.mjs <facts|status|prepare> <module> [spec|brd|prd] --home HOME');
+  else if (cmd === 'changes') process.stdout.write(JSON.stringify(changes(home, id, third), null, 2) + '\n');
+  else if (cmd === 'restamp') process.stdout.write(JSON.stringify(restamp(home, id, third), null, 2) + '\n');
+  else fail('usage: doc.mjs <facts|status|prepare|changes|restamp> <module> [spec|brd|prd] --home HOME');
 }
 
 if (process.argv[1] && real(process.argv[1]) === real(fileURLToPath(import.meta.url))) main();

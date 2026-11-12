@@ -68,6 +68,7 @@ Each document has two layers.
 - **Examples.** Use real-sounding examples ("a doctor books a 30-minute slot"). Never use a real person's name, number or email.
 - **In short.** Keep its four lines. **Open questions: N** must equal the number of questions in this document's Open questions section. Write the key rules as short full sentences a reader understands alone: "A report opens only after the patient agrees to share it", not "consent first; tabs follow what was saved".
 - **Certainty in plain words.** Write "probably" or "it looks like" for an Inferred statement. Never write "(Inferred)" or other class names in the people layer.
+- **What a code value means.** A status number, flag or column is described by what the product shows about it. "A visit with a Nadi capture" is a fact only if a label or message says so. Otherwise write "a visit marked as having a Nadi reading (probably a captured pulse reading)", or ask.
 - **Plain verbs.** Say who does what: "the report shows the doctor who saw the patient", not "reports open under the visit's doctor".
 
 ## IDs

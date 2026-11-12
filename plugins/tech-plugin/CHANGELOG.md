@@ -2,6 +2,29 @@
 
 All notable changes to tech-plugin. Versions follow semantic versioning; the version is set only in `.claude-plugin/plugin.json`.
 
+## 0.4.3 (2026-11-12)
+
+Fixes from validating the Frontend's `reports` module, which took 23 deep code checks (spec 9, BRD 8, PRD 6) and never settled on its own.
+
+### Changed
+
+- **`validate` settles.**
+  - **At most 3 code checks per document per round.** `save-check` refuses a 4th. A round starts when `/tech-plugin:document` writes the document.
+  - **Later checks are focused.** The first check of a round reads everything. Later ones re-check only the last report's items and the lines changed since (`--mode focused`). The checker agents have a focused mode.
+  - **Known issues.** When no pass is left, `signoff.mjs known` records the leftovers in `checks/<doc>-known.md`. Approval accepts them, the developer is shown them, and the next rewrite gets them to fix. Risk items (keys, personal data) are never accepted.
+  - **Spec first.** A BRD or PRD check is refused until the documents it is written from are settled and it is stamped from their current text.
+  - **A settled document that changes later** (for example, a spec fix found by a BRD check) gets one focused check per change, even past the limit.
+- **`input-changed` no longer means a rewrite in `validate`.**
+  - New `doc.mjs changes` lists this document's changed lines since its last check, and the input's changed lines since it was stamped, with the IDs they mention.
+  - The writer updates only the dependent lines.
+  - New `doc.mjs restamp` records the input's new version. If the text didn't change, its checks still count.
+- **Writers in fix mode** state a code value's meaning (a status of 1, a flag) as fact only when the product shows it. Otherwise they say "probably" or ask. This was the main source of new findings on every pass.
+- **The readability review runs once per round.**
+
+### Fixed
+
+- **Recording a decision no longer makes every document "facts-changed".** Before, the next `validate` session stopped before sign-off once any question had been answered. Decisions still ride in the fact pack for the next rewrite. Hashes of fact packs without decisions are unchanged, so current documents stay current.
+
 ## 0.4.2 (2026-11-12)
 
 ### Added
