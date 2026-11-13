@@ -2,6 +2,40 @@
 
 All notable changes to tech-plugin. Versions follow semantic versioning; the version is set only in `.claude-plugin/plugin.json`.
 
+## 0.5.0 (2026-11-13)
+
+Build step 6 of 11: `diagram` and `sync`.
+
+### Added
+
+- **`/tech-plugin:diagram <module>`** draws, in `modules/<id>/diagrams/`:
+  - `flowchart.md`, in the people layer: screens in business words, arrows from links, buttons and forms, and other modules as their own box. A module with more than 25 screens is drawn in parts, grouped by folder.
+  - `sequences.md`, technical: one sequence diagram per PRD requirement whose evidence reaches an API. It runs from the page to the app, the backend and its tables, with a source for every step.
+  - `er.md`, technical: the module's tables. Links between tables are Inferred from `*_id` columns.
+  - `labels.yaml`: the screen names, which people can edit. Names come from the spec's Screens table where a row points at one screen; the new `diagram-labeller` agent (Sonnet, low) writes the rest. A script checks every name for plain words.
+  - `_stamp.json`: "Already up to date" until the code facts, the spec, the PRD or a name change.
+- **`/tech-plugin:diagram system`** draws `system/diagrams/block.md` and `journeys.md`.
+  - The block diagram shows apps, databases, a backend outside the breakdown, external services, and who asks whom for data.
+  - The journeys are the key flows in `system.yaml`. A step between two modules the code does not link is drawn dashed.
+- **`/tech-plugin:sync`**:
+  - stops with "run `/tech-plugin:breakdown --refresh` first" when the code map is stale;
+  - lists out-of-date documents and diagrams, and refreshes the ones you pick. Documents go through the document flow, with a warning first that an Approved one becomes a Draft. Diagrams are redrawn by script;
+  - picks up business documents from the `docs:` folders in `system.yaml`. `.md` and `.txt` files are copied to `sdlc-docs/sources/`; for other files it prints a `uvx markitdown` command for you to run;
+  - rebuilds the portal.
+- **The docs portal**, `sdlc-docs/portal/index.html`: static pages that open from disk.
+  - It has its own Markdown renderer, which escapes raw HTML, and loads Mermaid from a pinned jsDelivr URL, showing the diagram text offline.
+  - Appendices sit in a "For developers" fold. It never includes `_state/`, `_map/` or the fact packs.
+  - It is rebuilt only when what it shows has changed.
+- **Tests:** `tests/diagram-tests.mjs` (48 tests).
+
+### Changed
+
+- **The review checklist** (`checks/review-checklist.md`) now includes the business flowchart: the owner or PO reads it with the people layer. It has no separate sign-off.
+
+### Fixed
+
+- **README:** the commands table had a blank line in it, which cut it short.
+
 ## 0.4.3 (2026-11-12)
 
 Fixes from validating the Frontend's `reports` module, which took 23 deep code checks (spec 9, BRD 8, PRD 6) and never settled on its own.

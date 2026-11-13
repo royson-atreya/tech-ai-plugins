@@ -39,7 +39,7 @@ Arguments: `$ARGUMENTS`. Scripts: `${CLAUDE_PLUGIN_ROOT}/scripts/document/`.
    - each document's "In short" box (read the first lines of the file);
    - its open questions with their roles;
    - its known issues, one line each, if any;
-   - the path of `sdlc-docs/modules/<module>/checks/review-checklist.md`.
+   - the path of `sdlc-docs/modules/<module>/checks/review-checklist.md`, which also links the business flowchart when it is drawn.
 
    Ask the owner or PO to read the people layer, and a developer to check the appendices. Record each yes as the flow describes.
 4. **End.** Give each document's status: Draft, Reviewed or Approved. List who is still to approve or decide.

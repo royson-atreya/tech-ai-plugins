@@ -33,7 +33,19 @@ const CODE = [
   ['a URL', /\bhttps?:\/\/|\bwww\.[a-z0-9-]+\./i],
   ['words about the documentation tools (write about the product, not the scan)', /\b(fact pack|(?:the|automatic|code) scan|scanner|the scripts?|tech-plugin|modules\.yaml|_facts|approved purpose|code facts)\b/i],
 ];
-const ALLOWED_CAMEL = /^(iPhone|iPad|iOS|macOS|eSign|eKYC|mPIN|WhatsApp|YouTube|LinkedIn|PayPal|JavaScript|TypeScript|GitHub|PhonePe|OneSignal)$/;
+export const ALLOWED_CAMEL =/^(iPhone|iPad|iOS|macOS|eSign|eKYC|mPIN|WhatsApp|YouTube|LinkedIn|PayPal|JavaScript|TypeScript|GitHub|PhonePe|OneSignal)$/;
+
+// The first kind of code found in a short text (a diagram label), or null.
+export function codeIn(text) {
+  const t = String(text).replace(/"[^"]*"|“[^”]*”/g, ' ');
+  for (const [name, re] of CODE) {
+    const m = re.exec(t);
+    if (!m) continue;
+    if (name === 'a code name in camelCase' && ALLOWED_CAMEL.test(m[0])) continue;
+    return `${name} ("${m[0].slice(0, 40)}")`;
+  }
+  return null;
+}
 
 function jargon() {
   return fs

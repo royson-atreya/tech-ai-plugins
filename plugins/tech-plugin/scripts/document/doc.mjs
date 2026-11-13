@@ -269,7 +269,7 @@ export function writeFacts(home, id) {
 
 // ------------------------------------------------------------------ status
 
-function docInfo(home, id, doc) {
+export function docInfo(home, id, doc) {
   const f = path.join(docsDir(home), docRel(id, doc));
   if (!fs.existsSync(f)) return { exists: false };
   const text = fs.readFileSync(f, 'utf8');

@@ -5,3 +5,4 @@ import('./doctor-tests.mjs');
 import('./breakdown-tests.mjs');
 import('./map-tests.mjs');
 import('./document-tests.mjs');
+import('./diagram-tests.mjs');

@@ -28,8 +28,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bodyHash, joinDoc, splitDoc } from '../lib/frontmatter.mjs';
-import { docsDir, fail, parseArgs, real, today, writeDocs } from '../breakdown/common.mjs';
-import { DOCS_ORDER, NEEDS, checkedRel, decisionsRel, docRel, isDeep, knownRel, moduleOf, readRound } from './doc.mjs';
+import { docsDir, fail, parseArgs, readJson, real, today, writeDocs } from '../breakdown/common.mjs';
+import { DOCS_ORDER, NEEDS, checkedRel, decisionsRel, docRel, factsRelOf, isDeep, knownRel, moduleOf, readRound } from './doc.mjs';
+import { diagRel, diagramState } from '../diagram/diagram.mjs';
 import { checkDoc } from './check-doc.mjs';
 import { plainCheck } from './plain.mjs';
 
@@ -314,6 +315,19 @@ export function syncDocStatus(home, id) {
   return v;
 }
 
+// The business flowchart is part of the people layer: it has no sign-off of
+// its own; the owner or PO reads it with the documents.
+function flowchartLines(home, id) {
+  const L = ['## Business flowchart', ''];
+  const D = docsDir(home);
+  if (!fs.existsSync(path.join(D, diagRel(id, 'flowchart.md')))) return [...L, `Not drawn yet: \`/tech-plugin:diagram ${id}\`. Once drawn, the owner or PO reads it with the people layer.`, ''];
+  const facts = readJson(path.join(D, factsRelOf(id)));
+  const s = diagramState(home, id, facts ? facts.hash : null);
+  const when = s.drawnAt ? s.drawnAt.slice(0, 10) : '?';
+  L.push(`- [ ] **Owner or PO:** does [the flowchart](../diagrams/flowchart.md) show how people move through the screens, with the names they use? Drawn on ${when}${s.state === 'up-to-date' ? '; it matches the code and the documents.' : `; **out of date** (${s.reasons.join('; ')}): redraw it with \`/tech-plugin:diagram ${id}\` first.`}`, '- To change a screen name, edit `diagrams/labels.yaml` (set `from: you`), then redraw.', '');
+  return L;
+}
+
 export function checklist(home, id) {
   const { m } = moduleOf(home, id);
   const deep = isDeep(m);
@@ -328,7 +342,8 @@ export function checklist(home, id) {
     const lc = s.lastCheck ? `pass ${s.lastCheck.pass}${s.lastCheck.mode === 'focused' ? ' (focused)' : ''}: ${s.lastCheck.mismatch} mismatch, ${s.lastCheck.notProvable} not provable${s.lastCheck.current ? '' : ' (older text)'}${s.known && s.known.current ? `; [${s.known.items} known issue(s)](${doc}-known.md)` : ''}` : 'not run';
     L.push(`| [${doc}](../${doc}.md) | ${s.status} | ${lc} | ${s.readability ? 'done' : 'not run'} | ${s.people ? `${s.people.by} (${s.people.role}), ${s.people.on}` : 'waiting'} | ${s.technical ? `${s.technical.by} (${s.technical.role}), ${s.technical.on}` : 'waiting'} |`);
   }
-  L.push('', '## What each reviewer does', '', '- **Owner or PO (people layer):** read everything above "Appendix A". Is it right, and can someone outside the team follow it? Answer the open questions addressed to you.', '- **Developer (technical layer):** check Appendix A and B: do the cited lines show what the statements say? Answer the open questions addressed to you. Where a document lists known issues, read them: approving the technical layer accepts them until the next rewrite.', '');
+  L.push('', ...flowchartLines(home, id));
+  L.push('', '## What each reviewer does', '', '- **Owner or PO (people layer):** read everything above "Appendix A", and the business flowchart. Is it right, and can someone outside the team follow it? Answer the open questions addressed to you.', '- **Developer (technical layer):** check Appendix A and B: do the cited lines show what the statements say? Answer the open questions addressed to you. Where a document lists known issues, read them: approving the technical layer accepts them until the next rewrite.', '');
   L.push('## Open questions', '');
   let any = false;
   for (const doc of DOCS_ORDER) {

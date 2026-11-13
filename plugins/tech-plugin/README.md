@@ -2,7 +2,7 @@
 
 An SDLC/STLC toolbox for Claude Code that takes any software project from "understand what we have" to "release it safely", with a person approving every important step. Commands are `/tech-plugin:<command>`; each product repo gets its own notebook folder, `<repo>/sdlc-docs/`.
 
-**Status: 0.4.3, build step 5 of 11.** This version contains the safety guard, the session banner, `doctor`, `breakdown`, `document` and `validate`. The other commands come in later steps (see `docs/PLAN.md` in the marketplace repo).
+**Status: 0.5.0, build step 6 of 11.** This version contains the safety guard, the session banner, `doctor`, `breakdown`, `document`, `validate`, `diagram` and `sync`. The other commands come in later steps (see `docs/PLAN.md` in the marketplace repo).
 
 ## Install from the local marketplace
 
@@ -37,14 +37,16 @@ Then run `/tech-plugin:doctor`. Don't load the plugin into a session you are usi
 | --- | --- |
 | `/tech-plugin:doctor` | Checks Claude Code, node, git, Python, uv, graphify, the LSP plugin for each language it finds, the effort setting and the Zoho Sprints connection, then lists the commands. It never installs anything; it prints the commands for you to run. `doctor --ci` is coming in a later step. |
 | `/tech-plugin:breakdown` | Breaks a system into business modules. It finds the repos, asks 5 business questions, and detects each app's stack (`profile.md`, which you confirm). Then it reads the code and links screens to APIs across apps. It proposes modules (`modules.yaml`, which you approve) and writes the module catalogue, scope cards and module map. |
-
 | `/tech-plugin:document <module>` | Writes the module's functional spec, BRD and PRD, in that order, from the code facts. Each has an "In short" box, a people layer in plain words, and an evidence appendix in which every statement cites the code. |
 | `/tech-plugin:validate <module>` | Runs the checks, an independent doc-checker that re-reads every cited line, and a readability reviewer. The writer fixes what they find. Then it records who approved each layer: the owner or PO for the people layer, a developer for the technical one. |
+| `/tech-plugin:diagram <module>` | Draws a module's flowchart (screens in business words), a sequence diagram per PRD requirement that calls an API, and an ER diagram. `diagram system` draws the system block diagram and the key journeys. |
+| `/tech-plugin:sync` | Lists the documents and diagrams that no longer match the code, refreshes the ones you pick, picks up new business documents, and rebuilds the docs portal (`sdlc-docs/portal/index.html`). |
 
-All four commands run on Haiku at low effort and are manual-only (`disable-model-invocation`), so they add nothing to the context until you run them. The steps that need judgement go to agents:
+All the commands run on Haiku at low effort and are manual-only (`disable-model-invocation`), so they add nothing to the context until you run them. The steps that need judgement go to agents:
 - **Grouping code into modules:** `module-proposer`, Opus at high effort.
 - **Writing:** `doc-writer`, Sonnet at medium effort; `doc-writer-deep`, Opus at high effort, for modules flagged money, security or clinical.
 - **Checking:** `doc-checker`, with `doc-checker-deep` for those modules; and `readability-reviewer`.
+- **Screen names for diagrams:** `diagram-labeller`, Sonnet at low effort.
 
 ## breakdown
 
@@ -177,6 +179,54 @@ A critical module also needs a recorded decision on every open question. Answers
 
 Install one with `/plugin install <name>@claude-plugins-official`.
 
+## diagram and sync
+
+```
+/tech-plugin:diagram reports           # flowchart, sequences, ER for one module
+/tech-plugin:diagram system            # block diagram and key journeys
+/tech-plugin:sync                      # what is out of date; refresh what you pick; rebuild the portal
+/tech-plugin:sync --portal             # rebuild the portal only
+```
+
+**Scripts draw; only screen names are written.** Every diagram is Mermaid, drawn by a script from the code facts and the documents, so the same input gives the same diagram. Each box and arrow is listed with its source under "For developers".
+
+**A module's diagrams** go in `modules/<id>/diagrams/`:
+- **`flowchart.md`** is for everyone, and part of the people layer. Boxes are screens in business words. An arrow means a link, button or form takes people from one screen to the next. Other modules appear as their own box. A module with more than 25 screens is drawn in parts, grouped by folder, with an overview.
+- **`sequences.md`** is technical: one diagram per PRD requirement whose evidence reaches an API. It goes from the page to the app, the backend and its tables. A requirement whose evidence calls no API is listed.
+- **`er.md`** is technical: the module's tables and columns. Links between tables are **Inferred** from columns ending in `_id`, for a developer to confirm.
+- **`labels.yaml`** holds the screen names, and you can edit it. A name comes from the spec's Screens table when a row points at exactly one screen. The `diagram-labeller` agent writes the rest from the page titles. A script checks each name: at most 8 words, and no code names, paths or symbols. Names you or the labeller wrote are kept on every run. Set `from: you` when you change one.
+- **`_stamp.json`** records what they were drawn from. With no change, the command answers "Already up to date". It redraws when the code facts, the spec, the PRD or a name change.
+
+The flowchart has no sign-off of its own. The owner or PO reads it with the documents: `validate` adds it to `checks/review-checklist.md`.
+
+**The system diagrams** go in `system/diagrams/`. The module map stays with `breakdown`.
+- **`block.md`** shows the apps in plain words (website, server, mobile app), their databases, a backend outside the breakdown, and external services. Arrows show which app asks which for data.
+- **`journeys.md`** draws the key flows from `system.yaml`. Give each flow its steps, each with the module that does it:
+
+  ```yaml
+  key_flows:
+    - name: Ask for a pulse report
+      steps:
+        - patients: The doctor opens the patient list
+        - reports: The report is made
+  ```
+
+  An arrow is solid when the code shows the two modules working together, and dashed when it does not, so someone can check it. A flow with no steps gets the example above.
+
+**sync.**
+- **It checks the code map first.** If the code changed since the breakdown, it says "run `/tech-plugin:breakdown --refresh` first" and stops.
+- **A table of what is out of date.** Each row is a document whose code facts or input document changed, a module's diagrams, the system diagrams, or new business documents. You pick the rows.
+- **Documents are rewritten through the normal document flow.** Rewriting an Approved or Reviewed document makes it a Draft again, and the table warns about that first.
+- **Diagrams are redrawn by script.**
+- **Business documents** come from the folders listed under `docs:` in `system.yaml`. `.md` and `.txt` files are copied to `sdlc-docs/sources/`. For PDF, Word and other files, sync prints a `uvx markitdown "<file>" -o "<target>.md"` command for you to run; it never runs one. Files you put straight into `sources/` are picked up too. Hashes are kept in `_state/sources.json`, so only new and changed files show up.
+
+**The docs portal** is `sdlc-docs/portal/index.html`, static pages you open from disk:
+- **What it shows:** the system overview and diagrams, the module catalogue, every module's scope card, and its documents and diagrams when they exist, plus the glossary. Never `_state/`, `_map/` or the fact packs.
+- **Folds:** appendices and evidence sit in a closed "For developers" fold, and a document's page shows its status and who approved it.
+- **Safe to open:** it has its own Markdown renderer, and raw HTML in a document is escaped.
+- **Diagrams:** Mermaid comes from one pinned jsDelivr URL. Offline, a diagram's text is shown instead.
+- **Rebuilds:** only when what it shows has changed.
+
 ## The safety guard
 
 A fail-closed `PreToolUse` hook (`scripts/guard.mjs`, Node.js, no dependencies) checks **every** tool call before it runs. If the guard crashes, runs out of time (it has its own 2.5 s budget) or cannot understand a call, the call is blocked. It is run as `node guard.mjs || exit 2`, so a missing `node` also blocks. It never answers "allow": a call it passes still goes through Claude Code's normal permission prompts. Every block names its rule, for example:
@@ -256,6 +306,7 @@ node --test tests/
 
   It checks detection fact by fact, runs stages 1–2 through the scripts the way the command does, and proves that no secret file is opened and nothing outside `sdlc-docs/` changes.
 - `tests/document-tests.mjs` builds the Laravel + Flutter fixtures through `breakdown` (`tests/golden-doc.mjs`). It checks the fact pack, the status and freshness rules, both checks on good and broken sample documents, ID stability, every sign-off rule, redaction, the definitions and the guard.
+- `tests/diagram-tests.mjs` runs the same fixtures through `diagram` and `sync`. It checks screen names (from the spec, and the plain-name check), the flowchart, sequence and ER diagrams, the system diagrams, freshness, the sync table, business documents, and the portal (escaping, folds, links, rebuilds). It also checks the review checklist, the definitions, the guard, and that nothing outside `sdlc-docs/` changes.
 - `tests/map-tests.mjs` adds real code to those fixtures (`tests/golden-map.mjs`) plus a Go service. It checks:
   - every reader against exact routes, screens, calls and tables, and the Laravel parser on edge cases;
   - URL resolution, route matching and the module rules;
@@ -282,6 +333,8 @@ scripts/lib/stacks.mjs       stack detection; lib/yaml.mjs small YAML reader/wri
 scripts/lib/readers/         code readers: laravel, flutter, node, web, python, spring, generic, calls, externals
 scripts/lib/graph.mjs        graphify wrapper and graph queries; lib/modules.mjs module expansion and coverage
 scripts/document/            doc (fact pack, status, prepare), check-doc, plain, signoff, glossary
+scripts/diagram/             diagram (labels, module diagrams, freshness), system (block diagram, journeys), mermaid helpers
+scripts/sync/                sync (status table, business documents), portal (Markdown renderer, static pages)
 scripts/lib/readers/behaviour.mjs  validation rules, messages, page labels; lib/redact.mjs keys and personal data
 skills/doctor/SKILL.md       the doctor command
 skills/breakdown/SKILL.md    the breakdown command; stage details in references/breakdown/
@@ -290,6 +343,8 @@ agents/module-proposer.md    proposes module boundaries for approval (Opus, high
 agents/doc-writer*.md        writes one document (Sonnet; Opus for critical modules)
 agents/doc-checker*.md       re-reads every cited line (read-only; Opus for critical modules)
 agents/readability-reviewer.md  reads the people layer as a non-technical person (read-only)
+agents/diagram-labeller.md   writes plain screen names into labels.yaml (Sonnet, low effort)
+skills/diagram, skills/sync  the diagram and sync commands; flows in references/diagram/ and references/sync/
 references/document/         writing rules, spec/BRD/PRD templates, jargon list, flows
 config/defaults.json         secret patterns, protected branches, safe-command lists, blocked hosts
 tests/                       guard, doctor and breakdown tests (node --test tests/)
