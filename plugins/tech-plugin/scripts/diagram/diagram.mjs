@@ -15,7 +15,7 @@
 //         every screen named, in plain words (exit 1 if not)
 //   node diagram.mjs draw         <module|system> --home HOME
 //         module: flowchart.md (people layer), sequences.md and er.md
-//         (technical layer), _stamp.json
+//         (technical layer), each with a .drawio copy (drawio.mjs), _stamp.json
 //         system: system/diagrams/block.md and journeys.md, _stamp.json
 
 import fs from 'node:fs';
@@ -33,9 +33,10 @@ import { docInfo, docRel, factsRelOf, moduleOf, writeFacts } from '../document/d
 import { ALLOWED_CAMEL, codeIn } from '../document/plain.mjs';
 import { cells, evidenceOf, hits, idRegistry, label, msg, oneCite, resolveTags, section, sha, tagsIn } from './mermaid.mjs';
 import { drawSystem, systemState } from './system.mjs';
+import { drawioMissing, writeDrawio } from './drawio.mjs';
 
 // Bump when the drawings change for the same input: every diagram is then stale.
-export const RENDERER = 2;
+export const RENDERER = 3;
 export const MAX_SCREENS = 25;
 const MAX_WORDS = 8;
 export const diagRel = (id, f) => path.join('modules', id, 'diagrams', f);
@@ -208,6 +209,7 @@ export function diagramState(home, id, factsHash) {
   if (changed.includes('renderer')) changed = ['renderer'];
   const reasons = changed.map((k) => REASONS[k]);
   if (MODULE_FILES.some((f) => !fs.existsSync(path.join(D, diagRel(id, f))))) reasons.push('a diagram file is missing');
+  else if (MODULE_FILES.some((f) => drawioMissing(home, diagRel(id, f)))) reasons.push('a draw.io file is missing');
   return { state: reasons.length ? 'stale' : 'up-to-date', reasons, drawnAt: st.drawnAt || null };
 }
 
@@ -403,7 +405,7 @@ function flowchartMd(m, pack, graph, labels, counts) {
     L.push(...between, '```', '');
     P.forEach((p, i) => L.push(`## Part ${i + 1}`, '', ...draw(p, i)));
   } else if (pack.screens.length) L.push(...draw(pack.screens, 0));
-  L.push('## For developers', '', '| Screen name | Screen | Opens at | Source |', '|---|---|---|---|');
+  L.push('## For developers', '', `Also saved as \`flowchart.drawio\`, the same diagram to open and rearrange in draw.io or diagrams.net. A redraw never overwrites a copy you changed: it writes \`flowchart.new.drawio\` instead.`, '', '| Screen name | Screen | Opens at | Source |', '|---|---|---|---|');
   for (const s of pack.screens) L.push(`| ${nameOf(keyOf(s)).replace(/\|/g, '/')} | \`${s.id}\` (${s.app}) | ${s.path ? `\`${s.path}\`` : ''} | \`${s.cite}\` |`);
   L.push('', '**Arrows and their evidence**', '');
   const show = (k) => (k.startsWith('s:') ? nameOf(k.slice(2)) : graph.ends.get(k).name);
@@ -530,7 +532,7 @@ function sequenceFor(req, pack, sys, cites) {
 }
 
 function sequencesMd(home, id, m, pack, sys) {
-  const L = [`# ${m.name}: sequence diagrams`, '', `> **Status:** Draft, drawn on ${today()}. Technical layer: one diagram per PRD requirement whose evidence reaches an API.`, ''];
+  const L = [`# ${m.name}: sequence diagrams`, '', `> **Status:** Draft, drawn on ${today()}. Technical layer: one diagram per PRD requirement whose evidence reaches an API.`, '', `Also saved as \`sequences.drawio\`, the same diagram to open and rearrange in draw.io or diagrams.net. A redraw never overwrites a copy you changed: it writes \`sequences.new.drawio\` instead.`, ''];
   const prd = readDocText(home, id, 'prd');
   if (!prd) {
     L.push(`No PRD yet, so there are no requirements to draw. Write it with \`/tech-plugin:document ${id} prd\`, then run \`/tech-plugin:diagram ${id}\` again.`, '');
@@ -564,7 +566,7 @@ function sequencesMd(home, id, m, pack, sys) {
 const ent = (s) => String(s).replace(/[^A-Za-z0-9_-]/g, '_');
 
 function erMd(m, pack, sys) {
-  const L = [`# ${m.name}: data`, '', `> **Status:** Draft, drawn on ${today()}. Technical layer.`, ''];
+  const L = [`# ${m.name}: data`, '', `> **Status:** Draft, drawn on ${today()}. Technical layer.`, '', `Also saved as \`er.drawio\`, the same diagram to open and rearrange in draw.io or diagrams.net. A redraw never overwrites a copy you changed: it writes \`er.new.drawio\` instead.`, ''];
   const reg = idRegistry((_, s) => ent(s));
   const e = (s) => reg('', s);
   if (!pack.tables.length) {
@@ -617,13 +619,16 @@ export function drawModule(home, id) {
   const counts = { spec: 0, agent: 0, you: 0 };
   for (const s of L.screens) if (pack.screens.some((x) => keyOf(x) === String(s.screen))) counts[s.from === 'spec' ? 'spec' : s.from === 'agent' ? 'agent' : 'you']++;
   const graph = screenGraph(pack, sys, my, id);
-  writeDocs(home, diagRel(id, 'flowchart.md'), flowchartMd(m, pack, graph, labels, counts));
+  const flow = flowchartMd(m, pack, graph, labels, counts);
   const seq = sequencesMd(home, id, m, pack, sys);
-  writeDocs(home, diagRel(id, 'sequences.md'), seq.text);
   const er = erMd(m, pack, sys);
-  writeDocs(home, diagRel(id, 'er.md'), er.text);
+  const drawio = [];
+  for (const [f, text] of [['flowchart.md', flow], ['sequences.md', seq.text], ['er.md', er.text]]) {
+    writeDocs(home, diagRel(id, f), text);
+    drawio.push(writeDrawio(home, diagRel(id, f), text));
+  }
   writeDocs(home, diagRel(id, '_stamp.json'), JSON.stringify({ schema: 1, module: id, drawnAt: new Date().toISOString(), inputs: inputsOf(home, id, pack.hash) }, null, 1) + '\n');
-  return { module: id, files: MODULE_FILES.map((f) => path.join(docsDir(home), diagRel(id, f))), screens: pack.screens.length, parts: parts(pack.screens).length, arrows: graph.edges.length, sequences: seq.drawn, withoutApi: seq.without, tables: er.tables, tableLinks: er.links };
+  return { module: id, files: [...MODULE_FILES.map((f) => path.join(docsDir(home), diagRel(id, f))), ...drawio.filter((d) => d.written).map((d) => path.join(docsDir(home), d.file))], keptDrawio: drawio.filter((d) => d.kept).map((d) => ({ file: d.file, newFile: d.newFile })), screens: pack.screens.length, parts: parts(pack.screens).length, arrows: graph.edges.length, sequences: seq.drawn, withoutApi: seq.without, tables: er.tables, tableLinks: er.links };
 }
 
 function main() {

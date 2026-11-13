@@ -1,6 +1,6 @@
 ---
 name: doc-writer
-description: Used by /tech-plugin:document and /tech-plugin:validate for standard modules. Writes or fixes one module document (spec, brd or prd) from the module's fact pack, in the two-layer template (plain people layer, evidence appendix), then runs check-doc.mjs and plain.mjs and fixes until both pass. Writes only that document and new glossary terms; never sets Reviewed or Approved.
+description: Used by /tech-plugin:document and /tech-plugin:validate for standard modules. Writes or fixes one module document (spec, brd or prd) from the module's fact pack, in the two-layer template (plain people layer, evidence appendix), then runs check-doc.mjs and plain.mjs and fixes until both pass. Writes only that document and new glossary terms; never sets the status.
 tools: Read, Grep, Glob, Bash, Write, Edit
 model: sonnet
 effort: medium
@@ -49,7 +49,7 @@ You write one document for one module of a product, from facts the scripts colle
 
 ## Never
 
-- Never set `status` to Reviewed or Approved, and never touch `approvals` in the stamp. Only `/tech-plugin:validate` does that, after a person says yes.
+- Never change `status`, `checked` or `approvals` in the stamp. Only `/tech-plugin:validate` sets the status, once the checks pass.
 - Never invent a fact, a goal, a number or a meaning. Anything you can't cite becomes a question for a role.
 - Never copy a key, password, email, phone number or ID number, even from code.
 - Never write outside `out` and `glossary.md`.

@@ -217,14 +217,18 @@ function linker(fromMd, known) {
   };
 }
 
-function approvalLine(text) {
+function statusLine(text) {
   const p = splitDoc(text);
   const f = p.front;
   if (!f) return null;
   const hash = bodyHash(p.body);
+  const ck = f.checked && f.checked.hash === hash ? f.checked : null;
   const ap = f.approvals || {};
-  const one = (x, what) => (x && x.by ? `${what}: ${x.hash === hash ? `approved by ${x.by} (${x.role}) on ${x.on}` : 'changed since it was approved'}` : `${what}: waiting for approval`);
-  return `Status: ${f.status || 'Draft'} · ${one(ap.people, 'Written part')} · ${one(ap.technical, 'Technical part')}${f.date ? ` · written ${f.date}` : ''}`;
+  let s = 'Draft, not checked yet';
+  if (f.status === 'Checked' && ck) s = `Checked on ${ck.on}${ck.known ? ` · ${ck.known} known issue(s)` : ''}`;
+  // signed off by the two-layer sign-off of tech-plugin 0.5 and earlier
+  else if (f.status === 'Approved' && [ap.people, ap.technical].every((x) => x && x.by && x.hash === hash)) s = `Approved by ${ap.people.by} (${ap.people.role}) and ${ap.technical.by} (${ap.technical.role})`;
+  return `Status: ${s}${f.date ? ` · written ${f.date}` : ''}`;
 }
 
 // Splits a body into what everyone reads and the "For developers" fold.
@@ -251,7 +255,7 @@ function segments(body, x) {
   ];
 }
 
-const CSS = `:root{--bg:#fbfbf9;--fg:#1d2329;--muted:#5d6670;--line:#dfe2e6;--card:#ffffff;--accent:#1f6f8b;--accent-bg:#e8f2f5;--code:#f1f2f4}
+export const CSS = `:root{--bg:#fbfbf9;--fg:#1d2329;--muted:#5d6670;--line:#dfe2e6;--card:#ffffff;--accent:#1f6f8b;--accent-bg:#e8f2f5;--code:#f1f2f4}
 @media (prefers-color-scheme: dark){:root{--bg:#15191d;--fg:#e4e7ea;--muted:#9aa3ad;--line:#2d343b;--card:#1c2126;--accent:#7cc4dc;--accent-bg:#1d3038;--code:#232a31}}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
@@ -365,7 +369,7 @@ export function buildPortal(home, { force = false } = {}) {
     const link = linker(x.rel, known);
     const parts = [];
     let mermaid = false;
-    const badge = x.kind === 'doc' ? approvalLine(text) : x.kind === 'tech' ? 'For developers: technical page' : null;
+    const badge = x.kind === 'doc' ? statusLine(text) : x.kind === 'tech' ? 'For developers: technical page' : null;
     for (const s of segments(p.body, x)) {
       const r = renderMarkdown(s.md, link);
       mermaid = mermaid || r.mermaid;

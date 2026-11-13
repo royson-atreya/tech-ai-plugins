@@ -44,7 +44,7 @@ modules:
     critical: true                    # derived: any risk flag
     size: M                           # derived: S < 10 routes+screens <= M < 40 <= L
     owner: TBD
-    doc_status: none                  # none | draft | reviewed | approved
+    doc_status: none                  # none | draft | checked (approved: signed off before 0.6)
     in_use:
       dev: TBD
       staging: TBD

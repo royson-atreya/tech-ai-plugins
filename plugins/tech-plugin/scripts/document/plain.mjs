@@ -71,14 +71,29 @@ export function plainCheck(file, home) {
   const glossary = glossaryTerms(home);
   const words = facts ? facts.words.map((w) => w.word).filter((w) => !glossary.has(w)) : [];
   const missingTerms = new Map();
+  let mermaid = false;
   for (let k = start; k < end; k++) {
     const raw = lines[k];
+    // a Mermaid diagram (design screen changes): only its labels are read
+    if (/^\s*```\s*mermaid\s*$/.test(raw)) {
+      mermaid = true;
+      continue;
+    }
+    if (mermaid) {
+      if (/^\s*```\s*$/.test(raw)) mermaid = false;
+      else for (const m of raw.matchAll(/"([^"]*)"/g)) {
+        const c = codeIn(m[1].replace(/<br\/?>/g, ' '));
+        if (c) codeHits.push(`line ${k + 1 + off}: diagram label "${m[1].slice(0, 40)}": ${c}`);
+      }
+      continue;
+    }
     if (/^<!--/.test(raw.trim()) || /^\|?\s*:?-{3,}/.test(raw.trim())) continue;
     const t = raw
       .replace(/\[(?:(?:spec|brd) )?(E|Q)\d+\]/g, '')
       .replace(/^#{1,6}\s+/, '')
       .replace(/^>\s?/, '')
       .replace(/\*\*/g, '')
+      .replace(/\b[A-Za-z0-9][\w.-]*-[RSD]\d{2,}\b/g, 'ID')
       .replace(/\b(BR-\d{2,}|[A-Z][A-Z0-9-]*-R\d{2,}|Q\d+|E\d+|D\d+)\b/g, 'ID');
     const outsideQuotes = t.replace(/"[^"]*"|“[^”]*”/g, ' ');
     for (const [name, re] of CODE) {

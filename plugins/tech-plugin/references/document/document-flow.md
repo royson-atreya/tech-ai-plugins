@@ -21,9 +21,7 @@ For each document to write, in the order spec → brd → prd:
    - **Both pass:** go on to the next document.
    - **One fails:** start the same agent once more, with the failing lines, and ask it to fix only those.
    - **Still failing:** stop and show the failing lines to the user.
-4. **After the last document,** show:
-   - a table: document, requirement or rule count, open questions, check results;
-   - the top 3 open questions, each with its role.
+4. **After the last document,** say in one line per document: its requirement or rule count, open questions and check results. Then go on with the checks (step 5 of `/tech-plugin:document`).
 
 ## Sizes
 

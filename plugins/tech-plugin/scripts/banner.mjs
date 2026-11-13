@@ -40,14 +40,14 @@ function line() {
       docs = 'found (config.json is broken: the guard blocks until it is fixed)';
     }
   }
-  return `tech-plugin v${ver} | repo ${repo ? path.basename(repo) : 'none'} | sdlc-docs: ${docs} | guard on`;
+  return `tech-plugin v${ver} | repo ${repo ? path.basename(repo) : 'none'} | sdlc-docs: ${docs} | guard on | next: /tech-plugin:next`;
 }
 
 let msg;
 try {
   msg = line();
 } catch {
-  msg = 'tech-plugin v? | repo ? | sdlc-docs: ? | guard on';
+  msg = 'tech-plugin v? | repo ? | sdlc-docs: ? | guard on | next: /tech-plugin:next';
 }
 try {
   fs.writeSync(1, JSON.stringify({ systemMessage: msg }) + '\n');

@@ -1,6 +1,6 @@
 ---
 name: validate
-description: Validate a module's spec, BRD and PRD. Runs the mechanical and plain-language checks, an independent doc-checker that re-reads every cited line (twice for critical modules) and a readability reviewer, has the writer fix what they find, then records who approved each layer (owner/PO for the people layer, developer for the technical layer). Run as /tech-plugin:validate <module> [spec|brd|prd].
+description: Validate a module's spec, BRD and PRD. Runs the mechanical and plain-language checks, an independent doc-checker that re-reads every cited line (twice for critical modules) and a readability reviewer, and has the writer fix what they find. A document that passes becomes Checked; nobody signs off. Run as /tech-plugin:validate <module> [spec|brd|prd].
 argument-hint: "<module> [spec|brd|prd]"
 disable-model-invocation: true
 model: haiku
@@ -14,8 +14,7 @@ Arguments: `$ARGUMENTS`. Scripts: `${CLAUDE_PLUGIN_ROOT}/scripts/document/`.
 
 ## Rules
 
-- **A person approves; you never approve for them.** Record a sign-off or a decision only after an explicit yes or answer from the user in this chat, naming who they are and their role.
-- **Who approves what:** the people layer is approved by the owner, PO or BA, and the technical layer by a developer. If the user is neither, ask who will review, and stop.
+- **No sign-off.** The scripts set each document's status: Checked once its checks pass, Draft otherwise. Never ask anyone to approve a document, and never ask who the user is or their role.
 - **Agents do the reading.** You never edit a document yourself; the writer agent fixes it. You may write only the agents' reports, to `<home>/sdlc-docs/_state/report.md`, before saving them with the scripts.
 - **Keep the chat short.** Never paste whole documents or reports. Never open secret files.
 
@@ -32,14 +31,9 @@ Arguments: `$ARGUMENTS`. Scripts: `${CLAUDE_PLUGIN_ROOT}/scripts/document/`.
    - **A document is `facts-changed`:** the code changed. Say "Rewrite it first: /tech-plugin:document <module>" and stop.
    - **A document is `input-changed`:** refresh it (step 0 of the flow), do not rewrite it.
 
-   Then run `node "${CLAUDE_PLUGIN_ROOT}/scripts/document/signoff.mjs" status <module> --home <home>` for each document's round, last check and known issues.
-2. **Check each document** in the order spec, BRD, PRD (or the one given) by following `${CLAUDE_PLUGIN_ROOT}/references/document/validate-flow.md`. Skip a document that is already settled and unchanged.
+   Then run `node "${CLAUDE_PLUGIN_ROOT}/scripts/document/signoff.mjs" status <module> --home <home>` for each document's status, round, last check and known issues.
+2. **Check each document** in the order spec, BRD, PRD (or the one given) by following `${CLAUDE_PLUGIN_ROOT}/references/document/validate-flow.md`. Skip a document that is already Checked.
    - **At most 3 code-check passes per round.** When none is left, record the leftovers as known issues. Never ask the user for more passes.
-3. **Ask for sign-off.** Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/document/signoff.mjs" checklist <module> --home <home>`. Then show the user:
-   - each document's "In short" box (read the first lines of the file);
-   - its open questions with their roles;
-   - its known issues, one line each, if any;
-   - the path of `sdlc-docs/modules/<module>/checks/review-checklist.md`, which also links the business flowchart when it is drawn.
+3. **End.** Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/document/signoff.mjs" checklist <module> --home <home>`. Its last line gives each document's status. Show a short table: document, status (Checked or Draft), open questions, known issues. Give the path of `sdlc-docs/modules/<module>/checks/review-checklist.md`. If a document is still a Draft, say in one line why (from the flow).
 
-   Ask the owner or PO to read the people layer, and a developer to check the appendices. Record each yes as the flow describes.
-4. **End.** Give each document's status: Draft, Reviewed or Approved. List who is still to approve or decide.
+   Open questions stay in the documents. Do not ask the user to answer them. If the user gives an answer anyway, record it as step 5 of the flow describes.

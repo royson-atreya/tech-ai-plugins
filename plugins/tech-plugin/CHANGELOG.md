@@ -2,6 +2,77 @@
 
 All notable changes to tech-plugin. Versions follow semantic versioning; the version is set only in `.claude-plugin/plugin.json`.
 
+## 0.6.0 (2026-11-13)
+
+Build step 7 of 11: `impact`, `requirement` and `design`. Also: easier to use (`/tech-plugin:next`, `document` in one go), draw.io files for every diagram, no sign-off for module documents, and a shorter README.
+
+### Added: `/tech-plugin:next`, the one command to remember
+
+- **`/tech-plugin:next`** works out the next step from the files in `sdlc-docs/` and runs it after a yes (`/tech-plugin:next yes` skips the question). In order: restart after a plugin update; the breakdown (missing, half done, or the code changed); `sync` when documents or diagrams no longer match the code; a work item waiting for its impact, requirements or design; the system diagrams; the next module in the suggested order whose documents are not all Checked or whose diagrams are not drawn, with "N of M modules documented and checked"; the docs website; then "Everything is up to date". It follows the chosen command's own instructions, so their rules and approvals apply.
+- `scripts/next.mjs` makes the choice, so it is the same every time.
+- **The session banner** ends with `next: /tech-plugin:next`. **`/tech-plugin:doctor`** shows a short "How to use" before the command list.
+
+### Changed: `document` does the whole module in one go
+
+- **`/tech-plugin:document <module>`** writes the spec, BRD and PRD, then checks them (what `validate` does) and draws the diagrams (what `diagram` does), and ends with each document Checked or Draft. When the documents already match the code it goes straight to the checks.
+- `--write-only` stops after writing. With `spec`, `brd` or `prd` it writes and checks that one document and does not draw.
+- `validate` and `diagram` stay, for redoing one part.
+
+### Added: draw.io files for every diagram
+
+- **Every diagram is written twice:** Mermaid, as before, and a `.drawio` file beside it, converted from that Mermaid by `scripts/diagram/drawio.mjs`. That covers the module flowchart, sequences and ER, the system block diagram and journeys, and the module map. Each Mermaid block is one page. Open the files in the draw.io app or diagrams.net.
+- **Layout by script**, as draw.io does not place boxes itself: flowcharts in columns left to right (by the longest path from a start box, loops ignored), arrows to the next column running between the columns; sequence diagrams as lifelines with the messages in order and notes; tables as boxes listing their columns, with one-to-many links.
+- **A `.drawio` you rearranged is never overwritten.** `_drawio.json` records what the plugin wrote; a redraw that finds a different file writes `<name>.new.drawio` beside it and says so. Delete your copy to get the plugin's back.
+- A missing `.drawio` makes the diagrams stale. The diagram renderers moved on (module 3, system 2), so every diagram is redrawn once, by script, with no model cost; screen names are kept.
+- Checked with the draw.io app's own export: the flowchart, sequence and ER pages open and draw.
+
+### Changed: no sign-off for module documents
+
+- **`/tech-plugin:validate` ends at Checked.** The checks are the same: script checks, the readability review, 1–3 doc-checker passes (two for critical modules), and the writer's fixes. A document becomes **Checked** by itself once its last pass is on its current text and clean (or the leftovers are recorded as known issues), the readability review is done, and `check-doc.mjs` and `plain.mjs` pass. The stamp records `checked: {on, hash, pass, known}`. A Checked document that changes counts as a Draft again until validate checks it.
+- **Removed:** `signoff.mjs approve`, the owner/PO sign-off of the people layer and the developer sign-off of the technical layer, the Reviewed status, and "a critical module waits for a decision on every open question". Validate never asks who you are or for a yes.
+- **Known issues** no longer need a developer to accept them: they are listed in `checks/<doc>-known.md` and the next rewrite fixes them. A key or personal data is still never accepted.
+- **Open questions** stay in the documents. `signoff.mjs decide` records an answer only when someone gives one; nothing waits for it.
+- **`modules.yaml` `doc_status`** is `none`, `draft` or `checked`.
+- **Documents Approved before 0.6** keep their status, and still pass `check-doc.mjs`, until their text changes. Then they become Drafts, and validate can mark them Checked.
+- `check-doc.mjs`: status is Draft or Checked; Checked needs a check record, so a writer cannot set it. A change after the check is a warning, not a failure, so the writer's fixes still pass.
+- `review-checklist.md` lists each document's status, checks and open questions, with no approver columns. The portal shows "Checked on <date>" or "Draft, not checked yet". `sync` and the impact pack say "Checked" instead of "approved".
+- Tests: the sign-off tests are replaced by Checked tests. With `tests/next-tests.mjs` and the draw.io tests, 847 tests in all.
+
+### Changed: README
+
+- **`README.md` is a short guide for people using the plugin:** install, the four ways to use it with the exact commands, every command with an example, what it never does, and what to do when something goes wrong.
+- **`REFERENCE.md`** keeps the full detail (stages, checks, guard rules, settings, tests, layout) for people who build or troubleshoot the plugin.
+
+### Added
+
+- **Work items:** one folder per piece of new work, `sdlc-docs/work/<ID>/`, with `request.md`, `status.json` (level, modules, each document's state, the next step) and `decisions.md`.
+  - The ID is the Zoho Sprints item number when there is one, otherwise `W-001`, `W-002`…
+  - Zoho Sprints is only read.
+  - Request text and answers go through files, never through a command line. A request holding a phone number, email or key is refused.
+- **`/tech-plugin:impact <ID | "request">`** writes `impact.md` and `impact-report.html`.
+  - A script ranks modules by the words they share with the request; rare words count more.
+  - The new `impact-analyst` agent (Opus, high) chooses the modules. A script builds the impact pack for them: routes, screens, what they ask other servers for, other apps that call them, tables shared with other modules, risk flags, approved documents that would go back to Draft, and code the graphify graph groups with them (Inferred).
+  - The document gives the parts it touches, who notices, risk (Low to Critical), size (S to XL), the proposed level (Quick, Standard or Full) and open questions, with every statement cited.
+- **`/tech-plugin:requirement <ID>`** writes `requirement.md`.
+  - `requirement-analyst` (Opus, high) writes requirements `<ID>-Rnn`: Given/When/Then criteria, a source, and the module requirement each changes or "new". Every gap becomes a question for a role.
+  - The person's answers are recorded as decisions, and the requirements are updated.
+  - `story-writer` (Sonnet, medium) adds user stories `<ID>-Snn`, covering every requirement.
+  - The owner, PO or BA approves.
+- **`/tech-plugin:design <ID>`** writes `design.md`.
+  - `design-architect` (Opus, high) writes the approach and the decisions `<ID>-Dnn` (ADRs: context, options, decision, consequences).
+  - `design-writer` (Sonnet, medium) writes the screen changes, API and data changes, and the requirement coverage.
+  - A developer or tech lead approves. A Quick item needs no design.
+  - `sdlc-docs/decisions/README.md` lists every decision; it is Accepted once its design is approved.
+- **`check-work.mjs`** checks each document: template headings, "In short" values and counts, tags, citations, IDs and coverage, keys and personal data, and freshness. Approval is refused while a check fails, a question has no answer, or the document is out of date. An approval holds only for the exact text approved.
+- **Tests:** `tests/work-tests.mjs` (39 tests).
+
+### Changed
+
+- **`plain.mjs`** reads only the labels of a Mermaid diagram in the people layer, and treats work-item IDs (`W-001-R01`) as IDs.
+- **Open questions** may be addressed to a tech lead or architect.
+- The citation check is shared: `checkCitations` in `check-doc.mjs`.
+- The portal's stylesheet is exported for the impact report.
+
 ## 0.5.1 (2026-11-13)
 
 Fixes from a code review of 0.5.0.

@@ -135,6 +135,10 @@ export function report({ dir, env = process.env, home = os.homedir() } = {}) {
   lines.push(`**tech-plugin v${pluginVersion()} doctor** (${dir})`, '');
   lines.push('| Check | Status | Details / fix |', '|---|---|---|');
   for (const r of rows) lines.push(`| ${r.map(esc).join(' | ')} |`);
+  lines.push('', '**How to use**', '');
+  lines.push('1. Run `/tech-plugin:next`. It works out the next step for this project and runs it after your yes. That is all you need to remember.');
+  lines.push('2. Or by hand: `/tech-plugin:breakdown` once; then `/tech-plugin:document <module>` for each module (it writes, checks and draws); `/tech-plugin:sync` after the code changes; `/tech-plugin:impact "what you want to change"` for new work.');
+  lines.push('3. Read everything in a browser: open `sdlc-docs/portal/index.html` (built by `/tech-plugin:sync`).');
   lines.push('', '**Commands**', '');
   for (const c of commands()) lines.push(`- \`${c.name}\` ${c.description}`);
   lines.push('', 'doctor never installs anything: run the commands above yourself.');

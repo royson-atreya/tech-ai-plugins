@@ -16,10 +16,11 @@ import { buildDocSystem, runScript } from './golden-doc.mjs';
 import { SECRET_MARKER } from './golden.mjs';
 import { PLUGIN, runGuard } from './fixture.mjs';
 import { parseYaml, toYaml } from '../scripts/lib/yaml.mjs';
-import { joinDoc, splitDoc } from '../scripts/lib/frontmatter.mjs';
+import { bodyHash, joinDoc, splitDoc } from '../scripts/lib/frontmatter.mjs';
 import { labelProblem, parts, requirementsOf } from '../scripts/diagram/diagram.mjs';
 import { parseStep } from '../scripts/diagram/system.mjs';
 import { citesIn, idRegistry } from '../scripts/diagram/mermaid.mjs';
+import { mermaidBlocks, parseFlowchart, parseSequence, toDrawio } from '../scripts/diagram/drawio.mjs';
 import { buildFacts, docFreshness } from '../scripts/document/doc.mjs';
 import { statePath } from '../scripts/breakdown/state.mjs';
 import { MERMAID_URL, renderMarkdown } from '../scripts/sync/portal.mjs';
@@ -395,11 +396,113 @@ describe('system diagrams', () => {
   });
 });
 
+// Well-formed XML: every tag closes in order, attributes are quoted, no bare "&" or "<".
+function wellFormed(xml) {
+  const stack = [];
+  const body = xml.replace(/^<\?xml[^>]*\?>/, '');
+  for (const m of body.matchAll(/<(\/?)([A-Za-z][\w:-]*)((?:\s+[\w:-]+="[^"<]*")*)\s*(\/?)>|<|&(?!(?:amp|lt|gt|quot|apos|#\d+);)/g)) {
+    if (!m[2]) return `bad character at ${m.index}: ${body.slice(m.index, m.index + 30)}`;
+    if (m[1]) {
+      if (stack.pop() !== m[2]) return `</${m[2]}> closes the wrong tag at ${m.index}`;
+    } else if (!m[4]) stack.push(m[2]);
+  }
+  return stack.length ? `unclosed: ${stack.join(', ')}` : null;
+}
+const pagesOf = (xml) => [...xml.matchAll(/<diagram id="[^"]+" name="([^"]*)">([\s\S]*?)<\/diagram>/g)].map((m) => ({ name: m[1], body: m[2] }));
+const countOf = (s, re) => (s.match(re) || []).length;
+
+describe('draw.io copies', () => {
+  test('every module diagram with Mermaid gets a .drawio beside it, well formed', () => {
+    for (const f of ['flowchart', 'sequences', 'er']) {
+      const x = read(`modules/patients/diagrams/${f}.drawio`);
+      assert.equal(wellFormed(x), null, f);
+      assert.match(x, /^<mxfile host="tech-plugin">\n {2}<diagram id="page-1" name="/);
+    }
+    assert.ok(fs.existsSync(S('modules/patients/diagrams/_drawio.json')));
+    assert.match(read('modules/patients/diagrams/flowchart.md'), /Also saved as `flowchart\.drawio`/);
+  });
+  test('the same boxes and arrows as the Mermaid', () => {
+    const md = read('modules/patients/diagrams/flowchart.md');
+    const block = mermaidBlocks(md)[0];
+    const { nodes, edges } = parseFlowchart(block.lines);
+    const [p] = pagesOf(read('modules/patients/diagrams/flowchart.drawio'));
+    assert.equal(countOf(p.body, /vertex="1"/g), nodes.size);
+    assert.equal(countOf(p.body, /edge="1"/g), edges.length);
+    assert.match(p.body, /value="List of patients"/);
+    assert.match(p.body, /id="n_m_auth" value="Sign-in" style="rounded=1;arcSize=50;whiteSpace=wrap;html=1;dashed=1;"/);
+    assert.match(p.body, /source="n_s_web_patients_index" target="n_s_web_patients_show"/);
+  });
+  test('sequences: one page per requirement, a lifeline per participant, a message per arrow', () => {
+    const md = read('modules/patients/diagrams/sequences.md');
+    const pages = pagesOf(read('modules/patients/diagrams/sequences.drawio'));
+    const blocks = mermaidBlocks(md);
+    assert.equal(pages.length, blocks.length);
+    assert.match(pages[0].name, /^PATIENTS-R01: /);
+    const sq = parseSequence(blocks[0].lines);
+    assert.equal(countOf(pages[0].body, /shape=umlLifeline/g), sq.parts.length);
+    assert.equal(countOf(pages[0].body, /edge="1"/g), sq.steps.filter((s) => s.kind === 'message').length);
+    assert.match(pages[0].body, /value="Person" style="shape=umlLifeline;[^"]*rounded=1;fontStyle=1;"/);
+    assert.match(pages[0].body, /value="POST api\/reports"/);
+    assert.match(pages[0].body, /shape=note/);
+  });
+  test('ER: a box per table listing its columns; links from one to many', () => {
+    const x = read('modules/reports/diagrams/er.drawio');
+    assert.match(x, /id="t_pulse_reports" value="pulse_reports" style="swimlane;/);
+    assert.match(x, /value="patient_id \(FK\)"[^>]*parent="t_pulse_reports"/);
+    assert.match(x, /startArrow=ERmandOne;startFill=0;endArrow=ERzeroToMany;[^"]*" edge="1" parent="1" source="t_patients" target="t_pulse_reports"/);
+    assert.ok(!fs.existsSync(S('modules/reports/diagrams/flowchart.drawio')), 'no screens: no Mermaid, no .drawio');
+  });
+  test('system: block, journeys and the module map; line breaks and dashed arrows carried over', () => {
+    for (const f of ['block', 'journeys', 'module-map']) assert.equal(wellFormed(read(`system/diagrams/${f}.drawio`)), null, f);
+    const b = read('system/diagrams/block.drawio');
+    assert.match(b, /value="Website&lt;br&gt;web"/);
+    assert.match(b, /id="n_db_backend" value="Database of backend" style="shape=cylinder3;/);
+    assert.match(b, /value="asks for data" style="edgeStyle=orthogonalEdgeStyle[^"]*" edge="1" parent="1" source="n_app_web" target="n_app_backend"/);
+    assert.match(b, /endArrow=block;endFill=1;exitX=1;[^"]*dashed=1;" edge="1" parent="1" source="n_app_backend" target="n_ext_Razorpay"/);
+    assert.equal(pagesOf(read('system/diagrams/journeys.drawio')).length, 1);
+  });
+  test('drawing again gives the same file', () => {
+    const before = read('modules/patients/diagrams/flowchart.drawio');
+    ok(dg(['draw', 'patients']));
+    assert.equal(read('modules/patients/diagrams/flowchart.drawio'), before);
+  });
+  test('a .drawio someone rearranged is never overwritten: the new drawing goes beside it', () => {
+    const f = S('modules/patients/diagrams/flowchart.drawio');
+    const mine = read('modules/patients/diagrams/flowchart.drawio').replace('value="Start"', 'value="Begin here"');
+    assert.match(mine, /Begin here/);
+    fs.writeFileSync(f, mine);
+    setLabels('patients', (s) => (s.screen.endsWith('index') ? { ...s, label: 'All patients', from: 'you' } : s));
+    const r = json(dg(['draw', 'patients']));
+    assert.equal(fs.readFileSync(f, 'utf8'), mine);
+    assert.deepEqual(r.keptDrawio, [{ file: path.join('modules', 'patients', 'diagrams', 'flowchart.drawio'), newFile: path.join('modules', 'patients', 'diagrams', 'flowchart.new.drawio') }]);
+    assert.match(read('modules/patients/diagrams/flowchart.new.drawio'), /value="All patients"/);
+    // once the person removes their copy, the plugin writes it again and tidies up
+    fs.rmSync(f);
+    assert.deepEqual(json(dg(['status', 'patients'])).reasons, ['a draw.io file is missing']);
+    assert.deepEqual(json(dg(['draw', 'patients'])).keptDrawio, []);
+    assert.match(fs.readFileSync(f, 'utf8'), /value="All patients"/);
+    assert.ok(!fs.existsSync(S('modules/patients/diagrams/flowchart.new.drawio')));
+    assert.equal(json(dg(['status', 'patients'])).next, 'up-to-date');
+  });
+  test('layout: columns follow the arrows, loops do not hang, every shape is drawn', () => {
+    const md = ['# T', '', '```mermaid', 'flowchart LR', '  a["A"]', '  b[["Critical"]]', '  c[("Store")]', '  d(("Ext"))', '  e(["Other"])', '  a --> b', '  b --> c', '  c --> a', '  b -.-> d', '  c -->|"asks"| e', '  classDef other stroke-dasharray: 4 3', '  class e other', '```', ''].join('\n');
+    const x = toDrawio(md);
+    assert.equal(wellFormed(x), null);
+    const xOf = (id) => Number(new RegExp(`id="n_${id}"[^>]*><mxGeometry x="([\\d.]+)"`).exec(x)[1]);
+    assert.ok(xOf('a') < xOf('b') && xOf('b') < xOf('c'), 'a, b, c left to right despite the loop back to a');
+    assert.match(x, /id="n_b" value="Critical" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=3;"/);
+    assert.match(x, /id="n_d" value="Ext" style="ellipse;/);
+    assert.match(x, /id="n_e" value="Other" style="rounded=1;arcSize=50;whiteSpace=wrap;html=1;dashed=1;"/);
+    assert.equal(toDrawio('# No diagram here\n'), null);
+    assert.match(toDrawio('```mermaid\nflowchart LR\n  a["Tom & Jerry <b>"]\n```\n'), /value="Tom &amp;amp; Jerry &amp;lt;b&amp;gt;"/);
+  });
+});
+
 describe('the review checklist', () => {
-  test('the business flowchart is read with the people layer; no separate sign-off', () => {
+  test('the business flowchart is shown with the documents; no sign-off', () => {
     ok(runScript('document', 'signoff.mjs', ['checklist', 'patients', '--home', H]));
     const c = read('modules/patients/checks/review-checklist.md');
-    assert.match(c, /## Business flowchart\n\n- \[ \] \*\*Owner or PO:\*\* does \[the flowchart\]\(\.\.\/diagrams\/flowchart\.md\) show how people move through the screens/);
+    assert.match(c, /## Business flowchart\n\n- \[The flowchart\]\(\.\.\/diagrams\/flowchart\.md\) shows how people move through the screens/);
     assert.match(c, /it matches the code and the documents\./);
     ok(runScript('document', 'signoff.mjs', ['checklist', 'auth', '--home', H]));
     assert.match(read('modules/auth/checks/review-checklist.md'), /Not drawn yet: `\/tech-plugin:diagram auth`/);
@@ -414,16 +517,16 @@ describe('sync status', () => {
     assert.ok(s.current.includes('patients spec') && s.current.includes('patients diagrams') && s.current.includes('system diagrams'));
     assert.ok(s.notStarted.includes('auth'));
   });
-  test('an Approved document whose code facts changed: a row, with the warning that it becomes a Draft', () => {
+  test('a Checked document whose code facts changed: a row, with the warning that it becomes a Draft', () => {
     const f = S('modules/patients/spec.md');
     const keep = fs.readFileSync(f, 'utf8');
     const p = splitDoc(keep);
-    fs.writeFileSync(f, joinDoc({ ...p.front, status: 'Approved', facts: '0000000000000000' }, p.body));
+    fs.writeFileSync(f, joinDoc({ ...p.front, status: 'Checked', checked: { on: '2026-11-13', hash: bodyHash(p.body), pass: 1 }, facts: '0000000000000000' }, p.body));
     try {
       const s = json(sy(['status']));
       const spec = s.rows.find((r) => r.module === 'patients' && r.item === 'spec');
-      assert.deepEqual([spec.state, spec.action, spec.status], ['facts-changed', 'rewrite', 'Approved']);
-      assert.match(spec.warn, /spec is Approved: rewriting makes it a Draft again, to be approved again with \/tech-plugin:validate patients/);
+      assert.deepEqual([spec.state, spec.action, spec.status], ['facts-changed', 'rewrite', 'Checked']);
+      assert.match(spec.warn, /spec is Checked: rewriting makes it a Draft again, until \/tech-plugin:validate patients checks it/);
       assert.equal(s.rows.find((r) => r.item === 'brd'), undefined, 'the BRD is still written from the same spec text');
     } finally {
       fs.writeFileSync(f, keep);
@@ -520,7 +623,7 @@ describe('the docs portal', () => {
   });
   test('documents: status line, people layer open, appendices in the "For developers" fold', () => {
     const h = fs.readFileSync(S('portal/modules/patients/spec.html'), 'utf8');
-    assert.match(h, /<\/h1>\n<p class="status">Status: Draft · Written part: waiting for approval · Technical part: waiting for approval · written \d{4}-\d{2}-\d{2}<\/p>/);
+    assert.match(h, /<\/h1>\n<p class="status">Status: Draft, not checked yet · written \d{4}-\d{2}-\d{2}<\/p>/);
     const [people, rest] = h.split('<details class="dev"><summary>For developers: evidence and technical detail</summary>');
     assert.match(people, /<blockquote><p><strong>In short<\/strong><\/p>\n<ul><li><strong>What it does:<\/strong>/);
     assert.ok(!people.includes('Appendix A'));

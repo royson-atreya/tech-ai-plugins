@@ -136,16 +136,16 @@ describe('session banner', () => {
   test('repo with sdlc-docs', () => {
     const r = banner(JSON.stringify({ cwd: path.join(repo, 'sdlc-docs') }));
     assert.equal(r.status, 0);
-    assert.deepEqual(JSON.parse(r.stdout), { systemMessage: `tech-plugin v${VERSION} | repo brepo | sdlc-docs: found | guard on` });
+    assert.deepEqual(JSON.parse(r.stdout), { systemMessage: `tech-plugin v${VERSION} | repo brepo | sdlc-docs: found | guard on | next: /tech-plugin:next` });
   });
   test('no repo, no sdlc-docs', () => {
     const r = banner(JSON.stringify({ cwd: norepo }));
-    assert.equal(JSON.parse(r.stdout).systemMessage, `tech-plugin v${VERSION} | repo none | sdlc-docs: not set up | guard on`);
+    assert.equal(JSON.parse(r.stdout).systemMessage, `tech-plugin v${VERSION} | repo none | sdlc-docs: not set up | guard on | next: /tech-plugin:next`);
   });
   test('broken input still prints a line and exits 0', () => {
     const r = banner('{not json');
     assert.equal(r.status, 0);
-    assert.match(JSON.parse(r.stdout).systemMessage, new RegExp(`^tech-plugin v${V} \\| repo .* \\| guard on$`));
+    assert.match(JSON.parse(r.stdout).systemMessage, new RegExp(`^tech-plugin v${V} \\| repo .* \\| guard on \\| next: /tech-plugin:next$`));
   });
   test('missing plugin.json still prints a line', () => {
     const r = banner('{}', { CLAUDE_PLUGIN_ROOT: path.join(T, 'nowhere') });

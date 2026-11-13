@@ -11,7 +11,8 @@ From `node "S/signoff.mjs" status <module> --home <home>`, per document you need
 - `round`: the doc-checker passes since the document was written (`passes`, `full`, `limit`);
 - `lastCheck`: the last pass, and whether it is on the `current` text;
 - `known`: leftovers recorded as known issues;
-- `settled`: the last pass is on the current text, enough passes were run, and it is clean or its leftovers are recorded.
+- `settled`: the last pass is on the current text, enough passes were run, and it is clean or its leftovers are recorded;
+- `status`: Checked or Draft. The scripts set it after every save: a document is Checked once it is settled, its readability review is done and both script checks pass. Nobody signs off.
 
 ## Order: spec, then BRD, then PRD
 
@@ -73,7 +74,7 @@ At most 3 passes per round. A round starts when `/tech-plugin:document` writes t
    2. Run step 1.
    3. Run a focused pass.
 5. **Clean:** the document is settled once it has `checkerPasses` passes this round.
-6. **No pass left and not clean:** run `node "S/signoff.mjs" known <module> <doc> --home <home>`. Say in one line per item what is left, and that the developer accepts these at sign-off. Do not ask the user for more passes.
+6. **No pass left and not clean:** run `node "S/signoff.mjs" known <module> <doc> --home <home>`. Say in one line per item what is left. They do not stop the document being Checked; the next rewrite fixes them. Do not ask the user for more passes.
 
    A risk item (a key or personal data) is never accepted. Have the writer remove it. If it is still there, stop and show the line.
 
@@ -86,9 +87,9 @@ For example, a BRD check shows the spec says something the code does not do.
 3. Run step 1 on the earlier document, then one focused pass on it. A settled document gets one focused pass for each later change, even past the limit.
 4. Run step 0 for each document written from it.
 
-## 5. Decisions (critical modules, before Approved)
+## 5. Answers to open questions (optional)
 
-For each open question, ask the person in the question's role, one message with all the questions. Record each answer:
+Open questions stay in the document; nothing waits for them. Do not ask for answers. Only when the user gives one, record it:
 
 ```
 node "S/signoff.mjs" decide <module> --doc <doc> --q Q3 --answer "<their words>" --by "<name>" --role <role> --home <home>
@@ -96,15 +97,6 @@ node "S/signoff.mjs" decide <module> --doc <doc> --q Q3 --answer "<their words>"
 
 Answers do not make a document out of date. They are cited as `decision D<n>` the next time the document is written.
 
-## 6. Sign-off (only after an explicit yes in chat)
+## 6. Checked
 
-```
-node "S/signoff.mjs" approve <module> <doc> --layer people --by "<name>" --role PO --home <home>
-node "S/signoff.mjs" approve <module> <doc> --layer technical --by "<name>" --role developer --home <home>
-```
-
-The script refuses when a check is missing, older than the text, or not clean with no known issues recorded. Show its message as it is.
-
-- The people layer comes first; the status becomes Reviewed.
-- Before the developer says yes, show them `checks/<doc>-known.md` if it exists. Approving the technical layer accepts those items until the next rewrite.
-- With both layers approved, the status becomes Approved. A critical module also needs a decision on every open question first.
+Each save (`save-check`, `save-review`, `known`) ends with a `status:` line. A document becomes Checked by itself once it is settled, its readability review is done and both script checks pass. If one is still a Draft at the end, the reason is one of: the last pass is not on the current text, a risk item is left, not enough passes, or no readability review.

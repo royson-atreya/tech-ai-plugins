@@ -15,7 +15,7 @@ Arguments: `$ARGUMENTS`. Script: `${CLAUDE_PLUGIN_ROOT}/scripts/sync/sync.mjs`.
 ## Rules
 
 - You orchestrate; scripts and agents write. Never edit a document, a diagram or a portal page yourself.
-- Refresh only what the user picks. Never approve anything: only `/tech-plugin:validate` records approvals.
+- Refresh only what the user picks. Never set a document's status: only `/tech-plugin:validate` checks documents.
 - Never run a conversion command or install anything: show the commands for the user to run.
 - Never paste whole documents, `_facts` files or `_state/` files into the chat.
 
@@ -29,4 +29,4 @@ Arguments: `$ARGUMENTS`. Script: `${CLAUDE_PLUGIN_ROOT}/scripts/sync/sync.mjs`.
    - **Otherwise** follow `${CLAUDE_PLUGIN_ROOT}/references/sync/sync-flow.md`.
 4. **Refresh** what the user picked, as the flow says.
 5. **Portal.** Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/sync/sync.mjs" portal --home <home>`. It rebuilds only when what it shows has changed.
-6. **End.** List what was refreshed, what was left, and the portal path (`index` in the JSON). Remind the user that a refreshed document is a Draft until `/tech-plugin:validate <module>` records the approvals again.
+6. **End.** List what was refreshed, what was left, and the portal path (`index` in the JSON). Remind the user that a refreshed document is a Draft until `/tech-plugin:validate <module>` checks it again.

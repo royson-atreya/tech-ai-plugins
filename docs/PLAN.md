@@ -11,6 +11,19 @@ These override anything below that says otherwise.
 - **Tracker:** Zoho Sprints only, with plain-text tickets when Zoho isn't connected.
 - **Docs location:** inside each product repo, at `<repo>/sdlc-docs/`. In a multi-repo system, the system-level files (system.yaml, modules.yaml, `system/`, `modules/`) live in one home repo chosen during `breakdown` (default: the backend/API repo); each other repo's `sdlc-docs/` holds its own `_map/` and a pointer to the home repo. The guard allows writes inside `sdlc-docs/` and blocks the rest of the repo unless the work item is approved. The plugin never commits; you decide whether `sdlc-docs/` goes into Git.
 
+## Decisions taken on 13 Nov 2026
+
+These override anything below that says otherwise.
+
+- **No sign-off for module documents.** `validate` checks the spec, BRD and PRD and ends there. A document goes **Draft → Checked**: it is Checked when its last doc-checker pass is on the current text, the readability review is done and no key or personal data is left. Nobody approves it.
+  - Gone: the owner/PO sign-off of the people layer, the developer sign-off of the technical layer, the Reviewed and Approved statuses, and "a critical module waits for a decision on every open question".
+  - Kept: every check (script checks, readability review, 1–3 doc-checker passes, two for critical modules). Leftovers after the last pass are listed as known issues; they do not stop Checked, and the next rewrite fixes them.
+  - Open questions stay in the document. An answer is recorded as a decision only when someone gives one; nothing waits for it.
+  - `modules.yaml` `doc_status` is `none`, `draft` or `checked`. Documents already Approved under the old flow keep that status until they are rewritten.
+  - Approvals stay where they protect the code: the requirement and design of a work item, and the `APPROVED` file before any code is edited.
+- **Mermaid and draw.io are both default outputs of `diagram`.** Every diagram is written twice from the same script data: Mermaid (renders on GitHub and in the portal) and a `.drawio` file beside it that people can open and rearrange in draw.io or diagrams.net. Scripts write both; `sync` treats both as stale together. The step-6 build drew Mermaid only; draw.io is added to it.
+- **Easier to use.** A new command, `next`, is the one command to remember: it works out the next step from `sdlc-docs/` and runs it after a yes. `document <module>` now writes, checks (what `validate` does) and draws (what `diagram` does) in one run; `validate` and `diagram` stay for redoing one part. The session banner points at `next`, and `doctor` starts with a short "How to use". The README is a short guide for users; the detail moved to REFERENCE.md.
+
 ## Remember: initial graphify setup (build it in from day one)
 
 [graphify](https://github.com/safishamsi/graphify) builds a map of the whole codebase (files, functions, who calls whom, groups of related code) that the plugin queries instead of reading many files. It is free (Apache-2.0) and parses code locally. It goes in the first build steps, not later.
@@ -38,14 +51,15 @@ It is made of three things:
 
 In the tables, **Needs first** means the command stops and names the step to run; **(better with …)** means it warns you and asks whether to continue with a reduced result. With `strict: true` in the project config, every "better with" becomes "needs first".
 
-The plugin has **18 commands plus 1 optional**, down from 45: each one now does a complete job, and the steps it absorbed run inside it (see How the commands were trimmed).
+The plugin has **19 commands plus 1 optional**, down from 45 (`next` was added on 13 Nov): each one now does a complete job, and the steps it absorbed run inside it (see How the commands were trimmed).
 
-### Part 1: Set up (2 commands)
+### Part 1: Set up (3 commands)
 
 | Command | What it does | Needs first |
 | --- | --- | --- |
 | `breakdown` | Goes through the entire repo (or all connected repos), works out the stack, maps the code with graphify, and breaks it into business modules you approve | — |
-| `doctor` | Checks setup (graphify, LSP, connectors, settings) and lists the commands; `doctor --ci` sets up checks on every pull request | — |
+| `next` | The one command to remember: works out the next step from what is already done and runs it after a yes | — |
+| `doctor` | Checks setup (graphify, LSP, connectors, settings), says how to use the plugin and lists the commands; `doctor --ci` sets up checks on every pull request | — |
 
 #### The breakdown command
 
@@ -69,9 +83,9 @@ Run `/sdlc:breakdown` once per system: in the current repo, on every repo in the
 
 | Command | What it does | Needs first |
 | --- | --- | --- |
-| `document` | Writes a module's plain-language spec, BRD and PRD, in that order; `document <module> brd` writes one | `breakdown` |
-| `diagram` | Module flowcharts, journeys across apps, ER and sequence diagrams; `diagram system` for the whole-system map | `breakdown` (better with `document`, for business labels and sequences) |
-| `validate` | Checker and readability review, then a person approves | `document` |
+| `document` | Writes a module's plain-language spec, BRD and PRD, in that order, then checks them and draws its diagrams, in one run; `document <module> brd` writes and checks one | `breakdown` |
+| `diagram` | Module flowcharts, journeys across apps, ER and sequence diagrams, each as Mermaid and as a draw.io file; `diagram system` for the whole-system map | `breakdown` (better with `document`, for business labels and sequences) |
+| `validate` | Checker and readability review; a document that passes becomes Checked (no sign-off) | `document` |
 | `sync` | Finds out-of-date docs and diagrams after code changes, refreshes the ones you approve, picks up new files in `sources/`, rebuilds the docs portal | `breakdown` |
 
 ### Part 3: Plan new work (3 commands)
@@ -131,7 +145,7 @@ Run `/sdlc:breakdown` once per system: in the current repo, on every repo in the
 
 ### How a normal piece of work flows
 
-**Once per system:** `breakdown` → `document` → `diagram` → `validate`
+**Once per system:** `breakdown` → `document` for each module (it writes, checks and draws). Or just run `next` again and again: it picks each step.
 
 **Then for every change:** `impact` → `requirement` → `design` → `task` → **you approve** → `implement` → `review` → `test-cases` → `test-run` → `release` → **you push and deploy**
 
@@ -163,9 +177,9 @@ Each command ends by naming the next one, and `status` shows where every item st
     │   └── <module>/               one folder per module, e.g. login/, appointments/
     │       ├── module.md           scope card: purpose, screens, APIs, tables, risk  (breakdown)
     │       ├── spec.md  brd.md  prd.md                                             (document)
-    │       ├── diagrams/           flowchart, journey, ER, sequences + stamp files   (diagram)
+    │       ├── diagrams/           flowchart, journey, ER, sequences (.md + .drawio) + stamp files (diagram)
     │       ├── tests/              module test cases and regression suite             (test-cases, test-run)
-    │       └── checks/             checker, readability and sign-off reports          (validate)
+    │       └── checks/             checker, readability and known-issue reports       (validate)
     ├── work/
     │   └── <ID>/                   one folder per task, bug or feature
     │       ├── status.json         current phase, approvals, next step               (every command)
@@ -241,7 +255,7 @@ Every design choice below traces back to one of these requirements.
 
 - **Scripts extract the facts; Claude writes the prose.** The same commit always gives the same map.
 - **Never invent.** Cite the code, a ticket or a human document, or ask the question.
-- **A human approves; Claude drafts.** Only a person moves a document to Reviewed or Approved.
+- **Scripts and checkers verify; a human approves only what changes the code.** Module documents become Checked when the checks pass. A person approves a work item's requirement and design, and creates the `APPROVED` file before code is edited.
 - **Process depth matches task size**: Quick, Standard or Full.
 - **Every tool is optional.** A skill says what is missing and falls back to a weaker method; it never fakes a result.
 
@@ -251,7 +265,7 @@ Everything below ships together in one release. The order of the rows is the ord
 
 | Area | What is included |
 | --- | --- |
-| Understand and document | Connect a system (repos and documents), map the code across apps, plain-language functional specs, BRD and PRD, diagrams, human validation, keeping docs in sync, impact analysis |
+| Understand and document | Connect a system (repos and documents), map the code across apps, plain-language functional specs, BRD and PRD, diagrams, automatic validation, keeping docs in sync, impact analysis |
 | Requirements and design | Requirements for new work, user stories, architecture and ADRs, API contracts, data model, UI flows and design handoff |
 | Build | Pick up a task or bug, plan, implement behind an approval gate, review, handoff |
 | Test (STLC) | Test plan, test cases with traceability, web, API and mobile runs, sanity and regression, defects, test reports |
@@ -259,7 +273,7 @@ Everything below ships together in one release. The order of the rows is the ord
 | Flow and team | Work tracking and continuing with status, tracker sync, size estimates from impact, optional daily standup drafts |
 | Operate | CI/headless mode on pull requests, docs portal website, incident and RCA, performance testing, learning mode |
 
-**Done when:** a real multi-app product is documented and approved by its owners, and one feature goes from requirement to release with every approval gate respected.
+**Done when:** a real multi-app product is documented and checked, and one feature goes from requirement to release with every approval gate respected.
 
 **Out of scope**
 
@@ -283,13 +297,14 @@ The full folder structure of the plugin and of each project is in **The plan at 
 
 ## How the commands were trimmed
 
-The earlier 45 commands are now 18 plus 1 optional. Nothing was dropped: each absorbed step still runs, inside the command that needs it, and advanced users can re-run a single stage with `--only <stage>`.
+The earlier 45 commands are now 19 plus 1 optional. Nothing was dropped: each absorbed step still runs, inside the command that needs it, and advanced users can re-run a single stage with `--only <stage>`.
 
 | Part | Command | Absorbs these earlier commands or steps |
 | --- | --- | --- |
 | Set up | `breakdown` | connect, start, map, merge, link-apis, intake, building the graphify graph |
+| Set up | `next` | — (added 13 Nov) |
 | Set up | `doctor` | help, ci-setup, the feedback link |
-| Document | `document` | spec, brd, prd |
+| Document | `document` | spec, brd, prd; also runs the checks and the diagrams |
 | Document | `diagram` | — |
 | Document | `validate` | the readability review |
 | Document | `sync` | portal, picking up new business documents |
@@ -318,22 +333,22 @@ This stage turns a set of repos and business documents into validated, business-
 4. **Link.** Screen → API call → route → handler → tables, across web, mobile and backend. Calls with no route (likely bugs) and routes no screen calls (possibly unused) are listed for review.
 5. **Intake.** Business documents become Markdown sources; each fact taken from them is cited by file and section.
 6. **Write.** Per module: a functional spec, BRD and PRD in business language, plus diagrams (below). A separate doc-checker agent, in a fresh context, re-reads every cited line.
-7. **Validate.** Each module gets a review checklist and its open questions, each addressed to a role (owner, PO, developer). Corrections are applied and the sign-off is recorded.
+7. **Validate.** The checker and readability reviewer read each document; the writer fixes what they find. A document that passes becomes Checked. Its open questions stay listed, each addressed to a role (owner, PO, developer); answers are recorded when given. No sign-off.
 
 **Diagrams it produces**
 
 - **System block diagram:** apps, backend, database, external services and what calls what.
 - **Module flowcharts:** the user journey through each module's screens.
 - **Cross-app business flows:** one journey end to end across web, mobile and backend.
-- **ER diagram** per module, and a **sequence diagram** per requirement that calls an API. Mermaid is the default because it renders on GitHub; draw.io is optional. Every box and arrow cites its source.
+- **ER diagram** per module, and a **sequence diagram** per requirement that calls an API. Every diagram is written as Mermaid (renders on GitHub and in the portal) and as a draw.io file people can open and rearrange. Both come from the same script data. Every box and arrow cites its source.
 
 **Evidence rules** (taken from the `atreya` plugin)
 
 - Every statement cites `Repo:path:line`, a ticket or a human document. Anything else goes to Needs confirmation, phrased as a question for a named role.
 - Every statement carries one class: Verified, Inferred, Assumption, Unknown or Not affected.
-- Every document carries a stamp: module, date, the commit of each repo, and status. Claude writes Draft; only a person sets Reviewed or Approved.
+- Every document carries a stamp: module, date, the commit of each repo, and status. Claude writes Draft; `validate` sets Checked when the checks pass.
 - IDs never change: `BR-01` for business requirements, `<MODULE>-R01` for functional requirements. Test cases and defects link to them.
-- Critical modules (money, security, core clinical flow) get two doc-checker passes, and every open question waits for a decision.
+- Critical modules (money, security, core clinical flow) get two doc-checker passes, by a deeper writer and checker.
 
 **Built for AI as well as people** One index file, one folder per module, stable IDs and cross-links. Every later phase reads these files instead of re-reading the code, which is where the accuracy and cost savings the owner asked for come from.
 
@@ -353,7 +368,6 @@ Every document is written for a non-technical reader first: an owner, PO, BA, de
 - **Business labels on business diagrams.** Flowcharts and the system block diagram say "Doctor books appointment", not `AppointmentController@store`. ER and sequence diagrams go in the technical appendix.
 - **A plain-language check** runs on every document, like the citation check. It flags long sentences, code names or paths in the people layer, terms missing from the glossary, and words on a jargon list.
 - **A readability reviewer agent** reads each document as a non-technical person would and lists what it could not follow; the writer fixes those before human review.
-- **A non-technical person signs off.** At validation, the owner or PO approves the people layer; a developer approves the technical layer.
 - **Optional translated copies** of the people layer for readers who prefer Hindi, Marathi or another language.
 
 ## Any stack, any project
@@ -374,7 +388,7 @@ The plugin learns each project from its code instead of being built for one stac
 
 **Existing versus new projects**
 
-- **Existing:** breakdown → document → diagram → validate, as in Understand and document in detail.
+- **Existing:** breakdown → document (writes, checks and draws each module), as in Understand and document in detail; `next` picks each step.
 - **New or empty:** requirements first. The plugin then proposes 2–3 stack options with trade-offs, records the choice as an ADR, scaffolds the project and creates the profile.
 
 **Process depth matches the task**
@@ -428,7 +442,7 @@ A fail-closed guard hook checks every tool call before it runs: if the guard cra
 - A check fails any document containing a key-like string.
 - **New: a personal-data guard.** Patient or personal data never goes into prompts, documents, tickets or test data. Database tools run read-only with masked columns, and test data is synthetic. This matters because Nadi Tarangini handles health data, and India's DPDP Act 2023 applies to personal data.
 
-**Approvals and audit trail** Every gate (PRD, design, the `APPROVED` file, QA sign-off, release) records who approved, when, and which version of the document. Together with stable IDs this gives traceability from requirement to test to release.
+**Approvals and audit trail** Every gate (requirement, design, the `APPROVED` file, QA sign-off, release) records who approved, when, and which version of the document. Together with stable IDs this gives traceability from requirement to test to release.
 
 ## Tools and connectors
 
@@ -438,7 +452,7 @@ The default set is open source, runs offline and needs no account; connectors ar
 | --- | --- | --- |
 | Code understanding | [graphify](https://github.com/safishamsi/graphify) code graph (code parsed locally) · [Serena](https://github.com/oraios/serena) + official LSP plugins · [tree-sitter](https://github.com/tree-sitter/tree-sitter) / [ast-grep](https://github.com/ast-grep/ast-grep) · [Repomix](https://github.com/yamadashy/repomix) | [code-graph-rag](https://github.com/vitali87/code-graph-rag) or [CodeGraphContext](https://github.com/CodeGraphContext/CodeGraphContext) as MCP servers |
 | Business documents | [MarkItDown MCP](https://github.com/microsoft/markitdown) · [Docling MCP](https://github.com/docling-project/docling-mcp) | Google Drive, Confluence |
-| Diagrams | [Mermaid](https://github.com/mermaid-js/mermaid-cli) · [draw.io MCP](https://github.com/jgraph/drawio-mcp) | PlantUML, D2 |
+| Diagrams | [Mermaid](https://github.com/mermaid-js/mermaid-cli) · [draw.io](https://github.com/jgraph/drawio) files written by scripts | [draw.io MCP](https://github.com/jgraph/drawio-mcp), PlantUML, D2 |
 | Tracking | Markdown tickets in `work/` | [GitHub MCP](https://github.com/github/github-mcp-server) · [Zoho MCP](https://help.zoho.com/portal/en/kb/zoho-sprints/zoho-sprints-mcp-server/articles/zoho-sprints-mcp-server) · Jira ([mcp-atlassian](https://github.com/sooperset/mcp-atlassian)) · [Plane](https://github.com/makeplane/plane-mcp-server) · GitLab · Linear |
 | Design | Mermaid flows and wireframes | [Penpot MCP](https://github.com/penpot/penpot) · Figma MCP |
 | Database | [DBHub](https://github.com/bytebase/dbhub), read-only | MCP Toolbox for Databases |
@@ -563,8 +577,8 @@ We build in eleven steps, one at a time; each ends with a gate you approve befor
 2. **Skeleton, guard and graphify setup.** Marketplace repo, manifest, the cross-platform guard with its tests, the banner, `doctor` with the graphify and LSP checks. *Gate: all guard tests pass on macOS and Windows; `doctor` finds or installs graphify.*
 3. **`breakdown` stages 1–2.** Find the repos, business questions, stack detection and profiles. *Gate: correct profiles on the four golden repos, including the empty folder.*
 4. **`breakdown` stages 3–6.** Stack readers (porting the `atreya` scripts), the graphify graph, the generic fallback, cross-app linking, module proposal, catalogue and module cards. *Gate: every backend route assigned or explained on the Nadi Tarangini repos; a non-Laravel repo broken down; a second run with no code change says "Already up to date".*
-5. **`document` and `validate`.** Templates, the doc-checker, the plain-language check, the readability reviewer. *Gate: two modules documented; a non-technical reviewer understands and approves them.*
-6. **`diagram` and `sync`.** Module and system diagrams, staleness detection, the docs portal. *Gate: a full system documented and browsable in the portal.*
+5. **`document` and `validate`.** Templates, the doc-checker, the plain-language check, the readability reviewer. *Gate: two modules documented; a non-technical reader understands them.* (13 Nov: the sign-off part was removed; documents end at Checked.)
+6. **`diagram` and `sync`.** Module and system diagrams in Mermaid and draw.io, staleness detection, the docs portal. *Gate: a full system documented and browsable in the portal.*
 7. **`impact`, `requirement`, `design`.** *Gate: one real feature specified and approved.*
 8. **`task`, `implement`, `review`** and the three worker tiers. *Gate: that feature built with every approval gate respected.*
 9. **`test-cases`, `test-run`.** *Gate: that feature tested and its traceability matrix complete.*

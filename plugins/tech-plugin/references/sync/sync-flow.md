@@ -7,7 +7,7 @@ One table, from `rows` in the status JSON:
 | # | Module | What | State | Why | Refreshing does |
 |---|---|---|---|---|---|
 
-- Under the table, repeat each row's `warn` line. An Approved or Reviewed document becomes a Draft again when it is rewritten.
+- Under the table, repeat each row's `warn` line. A Checked (or Approved) document becomes a Draft again when it is rewritten.
 - Then one line: how many items are current (`current`), and how many modules have no documents or diagrams yet (`notStarted`).
 
 Ask: "Which rows should I refresh? (numbers, `all`, or `none`)". Wait for the answer.

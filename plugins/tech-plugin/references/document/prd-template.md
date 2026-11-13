@@ -76,5 +76,5 @@ row cited from the fact pack.>
 
 ## Document control
 
-Written by /tech-plugin:document as a Draft. Only a person moves it to Reviewed
-or Approved.
+Written by /tech-plugin:document as a Draft. /tech-plugin:validate marks it
+Checked once the checks pass (the date is in the stamp). No sign-off is needed.

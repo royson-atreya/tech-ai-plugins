@@ -344,7 +344,7 @@ describe('prepare and check-doc on a good spec', () => {
     assert.ok(pr.out.endsWith('sdlc-docs/modules/patients/spec.md'));
     for (const k of ['factsMd', 'template', 'rules', 'glossary']) assert.ok(fs.existsSync(pr[k]), k);
     const f = parseYaml(pr.stamp.replace(/^---\n|---\n$/g, ''));
-    assert.deepEqual([f.module, f.doc, f.status, f.approvals], ['patients', 'spec', 'Draft', { people: null, technical: null }]);
+    assert.deepEqual([f.module, f.doc, f.status, f.checked], ['patients', 'spec', 'Draft', null]);
     assert.equal(f.commits.web, 'b'.repeat(40));
   });
   test('check-doc passes', () => assert.match(ok(check(pr.out)), /check-doc: PASS/));
@@ -383,7 +383,9 @@ describe('check-doc catches broken documents', () => {
   test('a question without a role', () => fails((t) => t.replace('(for PO)', '(for Ramesh)'), /Q1 names no known role/));
   test('"In short" count that does not match', () => fails((t) => t.replace('**Open questions:** 1', '**Open questions:** 3'), /In short says 3, the Open questions section has 1/));
   test('Assumption without a question', () => fails((t) => t.replace('| `web:routes/web.php:12` | Verified |', '| `web:routes/web.php:12` | Assumption |'), /E3 is Assumption: its source must be the question/));
-  test('a writer setting Approved itself', () => fails((t) => t.replace('status: Draft', 'status: Approved'), /status Approved has both sign-offs for this text/));
+  test('a writer setting Checked itself', () => fails((t) => t.replace('status: Draft', 'status: Checked'), /status Checked has a check record/));
+  test('a writer setting Approved itself', () => fails((t) => t.replace('status: Draft', 'status: Approved'), /status Approved has a recorded sign-off/));
+  test('any other status', () => fails((t) => t.replace('status: Draft', 'status: Reviewed by me'), /status is Draft or Checked/));
   test('code that changed after writing: the stamp is stale', () => {
     const f = path.join(G.web, 'app/Http/Controllers/PatientPageController.php');
     const t = fs.readFileSync(f, 'utf8');
@@ -514,7 +516,7 @@ describe('freshness: already up to date, inputs that changed', () => {
   });
 });
 
-// ================================================================ sign-off
+// ================================================================ Checked (no sign-off)
 const report = (txt) => {
   const f = S('_state/report.md');
   fs.mkdirSync(path.dirname(f), { recursive: true });
@@ -524,69 +526,83 @@ const report = (txt) => {
 const CLEAN = '# Doc check\nSummary: 12 claims · 12 verified · 0 mismatch · 0 not provable · 0 risk\n\n## Mismatch\nNone.\n';
 const DIRTY = '# Doc check\nSummary: 12 claims · 10 verified · 1 mismatch · 1 not provable · 0 risk\n';
 const REVIEW = '# Readability review\nCould not follow: 0\n';
-const approve = (doc, layer, role, id = 'patients', by = 'Asha Rao') => run('signoff.mjs', ['approve', id, doc, '--layer', layer, '--by', by, '--role', role, '--home', H]);
+const front = (id, doc) => splitDoc(fs.readFileSync(S(`modules/${id}/${doc}.md`), 'utf8')).front;
+const docStatus = (id) => parseYaml(fs.readFileSync(S('modules.yaml'), 'utf8')).modules.find((m) => m.id === id).doc_status;
 
-describe('sign-off: standard module', () => {
-  test('no approval without a checker pass and a readability review', () => {
-    const r = approve('spec', 'people', 'PO');
-    assert.equal(r.code, 1);
-    assert.match(r.err, /no doc-checker report yet[\s\S]*no readability review yet/);
+describe('Checked: standard module', () => {
+  test('a Draft until a checker pass and a readability review', () => {
+    const s = json(run('signoff.mjs', ['status', 'patients', '--home', H]));
+    assert.deepEqual([s.spec.status, s.spec.checked, s.spec.readability, s.spec.lastCheck], ['Draft', null, false, null]);
+    assert.match(ok(run('signoff.mjs', ['checklist', 'patients', '--home', H])), /status: spec Draft, brd Draft, prd Draft/);
   });
-  test('a pass with mismatches blocks; the report is saved with the text it checked', () => {
-    assert.match(ok(run('signoff.mjs', ['save-review', 'patients', 'spec', '--input', report(REVIEW), '--home', H])), /0 thing\(s\) a non-technical reader could not follow/);
-    assert.match(ok(run('signoff.mjs', ['save-check', 'patients', 'spec', '--input', report(DIRTY), '--home', H])), /spec-check-1\.md: 1 mismatch, 1 not provable/);
+  test('a pass with mismatches leaves it a Draft; the report is saved with the text it checked', () => {
+    assert.match(ok(run('signoff.mjs', ['save-review', 'patients', 'spec', '--input', report(REVIEW), '--home', H])), /0 thing\(s\) a non-technical reader could not follow\nstatus: spec Draft/);
+    assert.match(ok(run('signoff.mjs', ['save-check', 'patients', 'spec', '--input', report(DIRTY), '--home', H])), /spec-check-1\.md: 1 mismatch, 1 not provable[\s\S]*status: spec Draft/);
     const head = fs.readFileSync(S('modules/patients/checks/spec-check-1.md'), 'utf8').split('\n')[0];
     assert.match(head, /Checked text:\*\* `[0-9a-f]{16}`/);
-    assert.match(approve('spec', 'people', 'PO').err, /the last doc-checker pass found 1 mismatch, 1 not provable/);
   });
   test('a report without the summary line is refused', () => {
     const r = run('signoff.mjs', ['save-check', 'patients', 'spec', '--input', report('looks fine to me'), '--home', H]);
     assert.equal(r.code, 1);
     assert.match(r.err, /no "Summary:/);
   });
-  test('the technical layer waits for the people layer; roles are enforced', () => {
-    ok(run('signoff.mjs', ['save-check', 'patients', 'spec', '--input', report(CLEAN), '--home', H]));
-    assert.match(approve('spec', 'technical', 'developer').err, /the people layer is approved first/);
-    assert.match(approve('spec', 'people', 'developer').err, /approved by the owner, PO or BA/);
-    assert.match(approve('spec', 'technical', 'PO').err, /approved by a developer/);
+  test('a clean pass: Checked, with nobody asked to approve', () => {
+    assert.match(ok(run('signoff.mjs', ['save-check', 'patients', 'spec', '--input', report(CLEAN), '--home', H])), /\(clean\)[\s\S]*status: spec Checked, brd Draft, prd Draft/);
+    const f = S('modules/patients/spec.md');
+    const p = splitDoc(fs.readFileSync(f, 'utf8'));
+    assert.deepEqual([p.front.status, p.front.checked.hash, p.front.checked.pass, 'approvals' in p.front], ['Checked', bodyHash(p.body), 2, false]);
+    assert.match(ok(check(f)), /PASS  status is Checked/);
   });
-  test('people layer by the PO: Reviewed; technical by a developer: Approved', () => {
-    assert.match(ok(approve('spec', 'people', 'PO')), /people layer approved by Asha Rao \(PO\); status Reviewed/);
-    assert.match(ok(approve('spec', 'technical', 'developer', 'patients', 'Ravi K')), /status Approved/);
-    const f = splitDoc(fs.readFileSync(S('modules/patients/spec.md'), 'utf8')).front;
-    assert.deepEqual([f.status, f.approvals.people.by, f.approvals.technical.role], ['Approved', 'Asha Rao', 'developer']);
-    assert.match(ok(check(S('modules/patients/spec.md'))), /PASS  status is Approved/);
-  });
-  test('the review checklist lists status, checks, approvers and open questions', () => {
+  test('the checklist lists status, checks and the open questions, with no approvers', () => {
+    ok(run('signoff.mjs', ['checklist', 'patients', '--home', H]));
     const c = fs.readFileSync(S('modules/patients/checks/review-checklist.md'), 'utf8');
-    assert.match(c, /\| \[spec\]\(\.\.\/spec\.md\) \| Approved \| pass 2: 0 mismatch, 0 not provable \| done \| Asha Rao \(PO\), \d{4}-\d{2}-\d{2} \| Ravi K \(developer\)/);
-    assert.match(c, /\| \*\*Q1\*\* Can a doctor change a patient's details from the mobile app\? \| PO \| waiting \|/);
+    assert.match(c, /\| \[spec\]\(\.\.\/spec\.md\) \| Checked \| pass 2: 0 mismatch, 0 not provable \| done \|\n/);
+    assert.match(c, /\| \*\*Q1\*\* Can a doctor change a patient's details from the mobile app\? \| PO \| open \|/);
+    assert.match(c, /No sign-off is needed\./);
+    assert.doesNotMatch(c, /Owner or PO|developer\)|waiting/);
   });
-  test('changing the text after approval: the sign-off no longer counts', () => {
+  test('changing the text after it was checked: a Draft again', () => {
     const f = S('modules/patients/spec.md');
     const keep = fs.readFileSync(f, 'utf8');
     fs.writeFileSync(f, keep.replace('Doctors open the patient list after they sign in.', 'Doctors open the list after they sign in.'));
     const r = check(f);
-    assert.equal(r.code, 1);
-    assert.match(r.out, /status Approved has both sign-offs for this text/);
-    assert.match(r.out, /WARN  changed since it was approved/);
+    assert.match(r.out, /WARN  changed since it was checked[\s\S]*counts as a Draft until \/tech-plugin:validate checks it again/);
+    assert.doesNotMatch(r.out, /FAIL  status/);
     const s = json(run('signoff.mjs', ['status', 'patients', '--home', H]));
-    assert.equal(s.spec.people, null);
+    assert.deepEqual([s.spec.status, s.spec.checked], ['Draft', null]);
+    assert.match(ok(run('signoff.mjs', ['sync', 'patients', '--home', H])), /doc_status of patients: draft/);
+    assert.deepEqual([front('patients', 'spec').status, front('patients', 'spec').checked], ['Draft', null]);
     fs.writeFileSync(f, keep);
   });
-  test('doc_status becomes approved only when all three documents are Approved', () => {
+  test('doc_status becomes checked when all three documents are Checked', () => {
     for (const doc of ['brd', 'prd']) {
       ok(run('signoff.mjs', ['save-review', 'patients', doc, '--input', report(REVIEW), '--home', H]));
       ok(run('signoff.mjs', ['save-check', 'patients', doc, '--input', report(CLEAN), '--home', H]));
-      ok(approve(doc, 'people', 'owner'));
     }
-    assert.equal(parseYaml(fs.readFileSync(S('modules.yaml'), 'utf8')).modules.find((m) => m.id === 'patients').doc_status, 'reviewed');
-    for (const doc of ['brd', 'prd']) ok(approve(doc, 'technical', 'dev', 'patients', 'Ravi K'));
-    assert.equal(parseYaml(fs.readFileSync(S('modules.yaml'), 'utf8')).modules.find((m) => m.id === 'patients').doc_status, 'approved');
+    assert.equal(docStatus('patients'), 'checked');
+  });
+  test('a document Approved by the old sign-off keeps its status until it changes', () => {
+    const f = S('modules/patients/spec.md');
+    const keep = fs.readFileSync(f, 'utf8');
+    const p = splitDoc(keep);
+    const signed = { by: 'Asha Rao', role: 'PO', on: '2026-11-12', hash: bodyHash(p.body) };
+    const fr = { ...p.front, status: 'Approved', approvals: { people: signed, technical: { ...signed, by: 'Ravi K', role: 'developer' } } };
+    delete fr.checked;
+    fs.writeFileSync(f, joinDoc(fr, p.body));
+    assert.match(ok(check(f)), /PASS  status is Approved \(signed off before tech-plugin 0\.6\)/);
+    assert.match(ok(run('signoff.mjs', ['checklist', 'patients', '--home', H])), /status: spec Approved, brd Checked, prd Checked/);
+    assert.equal(front('patients', 'spec').status, 'Approved');
+    assert.equal(docStatus('patients'), 'checked');
+    fs.writeFileSync(f, joinDoc(fr, p.body.replace('Doctors open the patient list after they sign in.', 'Doctors open the list after they sign in.')));
+    assert.match(check(f).out, /WARN  changed since it was approved/);
+    assert.equal(json(run('signoff.mjs', ['status', 'patients', '--home', H])).spec.status, 'Draft');
+    fs.writeFileSync(f, keep);
+    ok(run('signoff.mjs', ['sync', 'patients', '--home', H]));
+    assert.equal(front('patients', 'spec').status, 'Checked');
   });
 });
 
-describe('sign-off: critical module (money)', () => {
+describe('Checked: critical module (money)', () => {
   const PAY = SPEC_BODY.replace(/^# Patients/m, '# Payments')
     .replace('`web:routes/web.php:8`', '`backend:routes/api.php:13`')
     .replace('`web:resources/views/patients/index.blade.php:3`', '`backend:routes/api.php:24`')
@@ -600,17 +616,15 @@ describe('sign-off: critical module (money)', () => {
   });
   test('one clean checker pass is not enough', () => {
     ok(run('signoff.mjs', ['save-review', 'payments', 'spec', '--input', report(REVIEW), '--home', H]));
-    ok(run('signoff.mjs', ['save-check', 'payments', 'spec', '--input', report(CLEAN), '--home', H, '--checker', 'doc-checker-deep']));
-    assert.match(approve('spec', 'people', 'PO', 'payments').err, /a critical module needs two doc-checker passes/);
+    assert.match(ok(run('signoff.mjs', ['save-check', 'payments', 'spec', '--input', report(CLEAN), '--home', H, '--checker', 'doc-checker-deep'])), /status: spec Draft/);
   });
-  test('two passes and both sign-offs: Reviewed, waiting for a decision on Q1', () => {
-    ok(run('signoff.mjs', ['save-check', 'payments', 'spec', '--input', report(CLEAN), '--home', H]));
-    ok(approve('spec', 'people', 'PO', 'payments'));
-    assert.match(ok(approve('spec', 'technical', 'developer', 'payments')), /status Reviewed; Approved after a decision on Q1/);
+  test('two clean passes: Checked, with Q1 still open; nothing waits for an answer', () => {
+    assert.match(ok(run('signoff.mjs', ['save-check', 'payments', 'spec', '--input', report(CLEAN), '--home', H])), /status: spec Checked/);
+    assert.equal(json(run('signoff.mjs', ['status', 'payments', '--home', H])).spec.openQuestions[0].decision, null);
   });
-  test('recording the decision makes it Approved, and the fact pack carries it', () => {
+  test('an answer, when someone gives one, is recorded and carried by the fact pack; the status stays', () => {
     assert.match(ok(run('signoff.mjs', ['decide', 'payments', '--doc', 'spec', '--q', 'Q1', '--answer', 'No, only from the web dashboard', '--by', 'Asha Rao', '--role', 'PO', '--home', H])), /recorded D1/);
-    assert.equal(splitDoc(fs.readFileSync(S('modules/payments/spec.md'), 'utf8')).front.status, 'Approved');
+    assert.equal(front('payments', 'spec').status, 'Checked');
     ok(run('doc.mjs', ['facts', 'payments', '--home', H]));
     assert.match(fs.readFileSync(S('modules/payments/_facts.md'), 'utf8'), /\*\*D1\*\* \(spec Q1, Asha Rao \(PO\), \d{4}-\d{2}-\d{2}\): No, only from the web dashboard/);
     // an answer is not a code change: the spec is not "facts-changed" and still passes
@@ -621,6 +635,11 @@ describe('sign-off: critical module (money)', () => {
     const r = run('signoff.mjs', ['decide', 'payments', '--doc', 'spec', '--q', 'Q9', '--answer', 'x', '--by', 'A', '--role', 'PO', '--home', H]);
     assert.equal(r.code, 1);
     assert.match(r.err, /Q9 is not an open question in spec\.md/);
+  });
+  test('approve is gone', () => {
+    const r = run('signoff.mjs', ['approve', 'payments', 'spec', '--layer', 'people', '--by', 'A', '--role', 'PO', '--home', H]);
+    assert.equal(r.code, 1);
+    assert.match(r.err, /unknown command/);
   });
 });
 
@@ -635,15 +654,16 @@ describe('validate rounds: pass limit, focused passes, spec first, known issues,
     const r = save('spec', CLEAN);
     assert.equal(r.code, 1);
     assert.match(r.err, /already has 3 doc-checker passes this round \(the limit is 3\)[\s\S]*signoff\.mjs known payments spec/);
-    assert.match(approve('spec', 'technical', 'developer', 'payments').err, /record them as known issues/);
+    assert.equal(st().spec.status, 'Draft');
   });
-  test('known issues: the leftovers are recorded with the text; approval accepts them and says so', () => {
-    assert.match(ok(run('signoff.mjs', ['known', 'payments', 'spec', '--home', H])), /recorded 2 known issue\(s\) in modules\/payments\/checks\/spec-known\.md: 1 mismatch, 1 not provable/);
+  test('known issues: the leftovers are recorded with the text, and do not stop Checked', () => {
+    assert.match(ok(run('signoff.mjs', ['known', 'payments', 'spec', '--home', H])), /recorded 2 known issue\(s\) in modules\/payments\/checks\/spec-known\.md: 1 mismatch, 1 not provable\nstatus: spec Checked/);
     const k = fs.readFileSync(S('modules/payments/checks/spec-known.md'), 'utf8');
     assert.match(k, /\| 1 \| 12 \| "only" \| too strong \|/);
     assert.match(k, /\| 1 \| 20 \| "tab title" \| not cited \|/);
     assert.equal(st().spec.settled, true);
-    assert.match(ok(approve('spec', 'technical', 'developer', 'payments')), /accepted 2 known issue\(s\) \(modules\/payments\/checks\/spec-known\.md\)/);
+    assert.equal(front('payments', 'spec').checked.known, 2);
+    ok(run('signoff.mjs', ['checklist', 'payments', '--home', H]));
     assert.match(fs.readFileSync(S('modules/payments/checks/review-checklist.md'), 'utf8'), /pass 3: 1 mismatch, 1 not provable; \[2 known issue\(s\)\]\(spec-known\.md\)/);
   });
   test('a clean last pass has nothing to record', () => {
@@ -793,13 +813,18 @@ describe('skills, agents and the guard', () => {
     }
     for (const f of ['writing-rules.md', 'spec-template.md', 'brd-template.md', 'prd-template.md', 'jargon.txt', 'document-flow.md', 'validate-flow.md']) assert.ok(fs.existsSync(path.join(PLUGIN, 'references/document', f)), f);
   });
-  test('writers: Sonnet medium, Opus high for critical; they never approve', () => {
+  test('writers: Sonnet medium, Opus high for critical; they never set the status', () => {
     for (const [f, model, effort] of [['doc-writer', 'sonnet', 'medium'], ['doc-writer-deep', 'opus', 'high']]) {
       const t = read(`agents/${f}.md`);
       assert.match(t, new RegExp(`^model: ${model}$`, 'm'));
       assert.match(t, new RegExp(`^effort: ${effort}$`, 'm'));
-      assert.match(t, /Never set `status` to Reviewed or Approved/);
+      assert.match(t, /Never change `status`, `checked` or `approvals` in the stamp/);
     }
+  });
+  test('validate asks nobody to sign off', () => {
+    const t = read('skills/validate/SKILL.md') + read('references/document/validate-flow.md');
+    assert.doesNotMatch(t, /signoff\.mjs" approve|--layer|Reviewed|explicit yes/);
+    assert.match(read('skills/validate/SKILL.md'), /Never ask anyone to approve a document/);
   });
   test('checker and readability reviewer are read-only', () => {
     for (const [f, model, tools] of [['doc-checker', 'sonnet', 'Read, Grep, Glob'], ['doc-checker-deep', 'opus', 'Read, Grep, Glob'], ['readability-reviewer', 'sonnet', 'Read']]) {

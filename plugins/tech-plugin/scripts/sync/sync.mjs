@@ -185,8 +185,8 @@ export function status(home) {
         current.push(`${m.id} ${doc}`);
         continue;
       }
-      const signed = s.status === 'Approved' || s.status === 'Reviewed';
-      add({ module: m.id, item: doc, state: s.state, why: s.why, status: s.status, action: s.state === 'broken' ? 'fix the stamp by hand' : 'rewrite', warn: signed ? `${doc} is ${s.status}: rewriting makes it a Draft again, to be approved again with /tech-plugin:validate ${m.id}` : null });
+      const signed = s.status === 'Checked' || s.status === 'Approved';
+      add({ module: m.id, item: doc, state: s.state, why: s.why, status: s.status, action: s.state === 'broken' ? 'fix the stamp by hand' : 'rewrite', warn: signed ? `${doc} is ${s.status}: rewriting makes it a Draft again, until /tech-plugin:validate ${m.id} checks it` : null });
     }
     if (drawn) {
       const s = diagramState(home, m.id, pack.hash);

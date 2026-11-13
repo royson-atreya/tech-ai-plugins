@@ -4,7 +4,9 @@
 //                                external services, and what asks what for data
 //   system/diagrams/journeys.md  the key flows from system.yaml, step by step;
 //                                an arrow the code does not confirm is dashed
-// The module map stays with breakdown (system/diagrams/module-map.md).
+// The module map stays with breakdown (system/diagrams/module-map.md); its
+// draw.io copy is refreshed here too. Every diagram gets a .drawio copy
+// (drawio.mjs).
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -12,8 +14,9 @@ import { docsDir, fail, readJson, today, writeDocs } from '../breakdown/common.m
 import { factsStamps, loadLinks, loadSystem } from '../breakdown/load.mjs';
 import { loadExisting } from '../breakdown/modules.mjs';
 import { idRegistry, label, nid, sha } from './mermaid.mjs';
+import { drawioMissing, writeDrawio } from './drawio.mjs';
 
-export const SYSTEM_RENDERER = 1;
+export const SYSTEM_RENDERER = 2;
 export const SYSTEM_FILES = ['block.md', 'journeys.md'];
 const rel = (f) => path.join('system', 'diagrams', f);
 
@@ -47,6 +50,7 @@ export function systemState(home) {
   const now = inputs(home).stamp;
   const reasons = Object.keys(REASONS).filter((k) => (st.inputs || {})[k] !== now[k]).map((k) => REASONS[k]);
   if (SYSTEM_FILES.some((f) => !fs.existsSync(path.join(D, rel(f))))) reasons.push('a diagram file is missing');
+  else if ([...SYSTEM_FILES, 'module-map.md'].some((f) => drawioMissing(home, rel(f)))) reasons.push('a draw.io file is missing');
   return { state: reasons.length ? 'stale' : 'up-to-date', reasons, drawnAt: st.drawnAt || null };
 }
 
@@ -111,7 +115,7 @@ function blockMd(sys, links, my) {
     ev.push(`- ${a.id} → ${x.system}: used in ${x.files.length} file(s), e.g. \`${a.repo}:${f.file}:${f.lines[0]}\``);
   }
   M.push('```', '');
-  const L = [`# ${name}: the system at a glance`, '', `> **Status:** Draft, drawn on ${today()} from the code of every app in the system.`, ''];
+  const L = [`# ${name}: the system at a glance`, '', `> **Status:** Draft, drawn on ${today()} from the code of every app in the system.`, '', `Also saved as \`block.drawio\`, the same diagram to open and rearrange in draw.io or diagrams.net. A redraw never overwrites a copy you changed: it writes \`block.new.drawio\` instead.`, ''];
   L.push('How to read it: square boxes are the apps people use or that serve them. Cylinders are databases. Circles are services run by other companies; a dashed arrow means an app uses that service. "Asks for data" means one app sends requests to the other.', '', ...M);
   L.push('## For developers', '', '| App | Kind | Repo | Screens | Routes | Tables |', '|---|---|---|---|---|---|');
   for (const a of apps) L.push(`| ${a.id} | ${a.kind} | ${a.repo} | ${(a.screens || []).length} | ${(a.routes || []).filter((r) => !r.shadowed).length} | ${(a.tables || []).length} |`);
@@ -148,7 +152,7 @@ function journeysMd(sys, my) {
     }
     return null;
   };
-  const L = [`# ${name}: key journeys`, '', `> **Status:** Draft, drawn on ${today()} from the key flows in system.yaml and the links found in the code.`, ''];
+  const L = [`# ${name}: key journeys`, '', `> **Status:** Draft, drawn on ${today()} from the key flows in system.yaml and the links found in the code.`, '', `Also saved as \`journeys.drawio\`, the same diagram to open and rearrange in draw.io or diagrams.net. A redraw never overwrites a copy you changed: it writes \`journeys.new.drawio\` instead.`, ''];
   L.push('How to read it: each box is a step and names the part of the product that does it. A solid arrow means the code shows these two parts working together. A dashed arrow means the code does not confirm it: someone who knows the product should check that step.', '');
   if (!flows.length) {
     L.push('No key flows are given yet. Add them to `system.yaml` under `business:` → `key_flows:`, for example:', '', '```yaml', 'key_flows:', '  - name: Book a consultation', '    steps:', `      - ${my.modules[0] ? my.modules[0].id : 'auth'}: The patient signs in`, '      - The patient picks a time', '```', '');
@@ -196,10 +200,16 @@ export function drawSystem(home) {
   const my = loadExisting(home);
   if (!my || !Array.isArray(my.modules)) fail('no approved modules.yaml yet: run /tech-plugin:breakdown first');
   const { sys, links, stamp } = inputs(home);
-  writeDocs(home, rel('block.md'), blockMd(sys, links, my));
+  const block = blockMd(sys, links, my);
   const j = journeysMd(sys, my);
-  writeDocs(home, rel('journeys.md'), j.text);
+  const drawio = [];
+  for (const [f, text] of [['block.md', block], ['journeys.md', j.text]]) {
+    writeDocs(home, rel(f), text);
+    drawio.push(writeDrawio(home, rel(f), text));
+  }
+  const mapFile = path.join(docsDir(home), rel('module-map.md'));
+  if (fs.existsSync(mapFile)) drawio.push(writeDrawio(home, rel('module-map.md'), fs.readFileSync(mapFile, 'utf8')));
   writeDocs(home, rel('_stamp.json'), JSON.stringify({ schema: 1, drawnAt: new Date().toISOString(), inputs: stamp }, null, 1) + '\n');
   const D = docsDir(home);
-  return { module: 'system', files: SYSTEM_FILES.map((f) => path.join(D, rel(f))), apps: sys.apps.size, journeys: j.flows, dashedArrows: j.dashed };
+  return { module: 'system', files: [...SYSTEM_FILES.map((f) => path.join(D, rel(f))), ...drawio.filter((d) => d.written).map((d) => path.join(D, d.file))], keptDrawio: drawio.filter((d) => d.kept).map((d) => ({ file: d.file, newFile: d.newFile })), apps: sys.apps.size, journeys: j.flows, dashedArrows: j.dashed };
 }

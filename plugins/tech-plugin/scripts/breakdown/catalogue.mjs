@@ -9,6 +9,7 @@
 //   modules/<id>/module.md          scope card per module (a "Notes" block you write is kept)
 //   system/overview.md              the whole system on one page
 //   system/diagrams/module-map.md   Mermaid module map; every arrow listed with its evidence
+//                                   (+ module-map.drawio, the same map for draw.io)
 // and adds the domain words found in code to glossary.md (meaning to be confirmed).
 
 import crypto from 'node:crypto';
@@ -20,6 +21,7 @@ import { factsStamps, loadLinks, loadSystem } from './load.mjs';
 import { loadExisting } from './modules.mjs';
 import { loadState, saveState } from './state.mjs';
 import { writeIndexFromYaml } from './write.mjs';
+import { writeDrawio } from '../diagram/drawio.mjs';
 
 const esc = (s) => String(s ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
 const NOTES_START = '<!-- notes:start (yours: kept on every rewrite) -->';
@@ -142,7 +144,7 @@ export function writeCatalogue(home) {
 
   // ---- module map (Mermaid) with evidence
   const id = (s) => s.replace(/[^A-Za-z0-9_]/g, '_');
-  const M = ['# Module map', '', ...stamp('Draft'), 'Boxes are modules (thick border: critical); an arrow means the first module calls an API of the second. External services hang off the modules that use them. Every arrow is listed below with its evidence.', '', '```mermaid', 'flowchart LR'];
+  const M = ['# Module map', '', ...stamp('Draft'), 'Boxes are modules (thick border: critical); an arrow means the first module calls an API of the second. External services hang off the modules that use them. Every arrow is listed below with its evidence.', '', `Also saved as \`module-map.drawio\`, the same diagram to open and rearrange in draw.io or diagrams.net. A redraw never overwrites a copy you changed: it writes \`module-map.new.drawio\` instead.`, '', '```mermaid', 'flowchart LR'];
   for (const m of my.modules) M.push(`  ${id(m.id)}${m.critical ? '[["' : '["'}${m.name.replace(/"/g, "'")}${m.critical ? '"]]' : '"]'}`);
   const ext = [...new Set(my.modules.flatMap((m) => m.external_systems || []))];
   for (const e of ext) M.push(`  ext_${id(e)}(("${e.replace(/"/g, "'")}"))`);
@@ -156,6 +158,7 @@ export function writeCatalogue(home) {
   }
   M.push(...(ev.length ? ev : ['No calls between modules were found.']), '');
   writeDocs(home, path.join('system', 'diagrams', 'module-map.md'), M.join('\n'));
+  writeDrawio(home, path.join('system', 'diagrams', 'module-map.md'), M.join('\n'));
   files.push('system/diagrams/module-map.md');
 
   // ---- system overview

@@ -8,34 +8,35 @@
 //        BRD or PRD pass while a document it is written from is not settled
 //   node signoff.mjs known <module> <doc> --home HOME
 //        records what the last pass left open as known issues
-//        (checks/<doc>-known.md); a developer accepts them at sign-off
+//        (checks/<doc>-known.md); they do not stop Checked
 //   node signoff.mjs save-review <module> <doc> --input FILE --home HOME
 //        saves the readability review as checks/<doc>-readability.md
 //   node signoff.mjs decide <module> --doc D --q Q3 --answer TEXT --by NAME --role ROLE --home HOME
-//        records a person's decision on an open question in checks/decisions.md
-//   node signoff.mjs approve <module> <doc> --layer people|technical --by NAME --role ROLE --home HOME
-//        records a sign-off, after the checks pass. people layer: owner, PO or BA;
-//        technical layer: developer. Draft -> Reviewed (people) -> Approved (both;
-//        a critical module also needs a decision on every open question)
-//   node signoff.mjs checklist <module> --home HOME     writes checks/review-checklist.md
-//   node signoff.mjs sync <module> --home HOME          sets doc_status in modules.yaml
+//        records a person's answer to an open question in checks/decisions.md
+//        (optional: nothing waits for an answer)
+//   node signoff.mjs checklist <module> --home HOME     marks, then writes checks/review-checklist.md
+//   node signoff.mjs sync <module> --home HOME          marks, then sets doc_status in modules.yaml
 //   node signoff.mjs status <module> --home HOME        JSON per document
 //
-// WHY the hash: a sign-off and a check report apply to one exact text. When
-// the document changes afterwards, they no longer count.
+// Marking (after save-check, save-review, known, checklist and sync): a
+// document is Checked once its last doc-checker pass is on its current text
+// and clean (or its leftovers are recorded as known issues), with enough
+// passes this round, a readability review, and check-doc and plain passing.
+// Nobody signs off. A Checked document that changed is a Draft again.
+//
+// WHY the hash: a check report and the Checked record apply to one exact
+// text. When the document changes afterwards, they no longer count.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bodyHash, joinDoc, splitDoc } from '../lib/frontmatter.mjs';
 import { docsDir, fail, parseArgs, readJson, real, today, writeDocs } from '../breakdown/common.mjs';
-import { DOCS_ORDER, NEEDS, buildFacts, checkedRel, decisionsRel, docRel, factsRelOf, isDeep, knownRel, moduleOf, readRound } from './doc.mjs';
+import { DOCS_ORDER, NEEDS, buildFacts, checkedRel, decisionsRel, docInfo, docRel, factsRelOf, isDeep, knownRel, moduleOf, readRound } from './doc.mjs';
 import { diagRel, diagramState } from '../diagram/diagram.mjs';
 import { checkDoc } from './check-doc.mjs';
 import { plainCheck } from './plain.mjs';
 
-const PEOPLE_ROLES = /^(owner|product owner|po|ba|business analyst)$/i;
-const TECH_ROLES = /^(developer|dev|tech lead|engineer|architect)$/i;
 const checksDir = (id) => path.join('modules', id, 'checks');
 
 function readDoc(home, id, doc) {
@@ -112,7 +113,7 @@ function saveCheck(home, id, doc, input, checker, mode = 'full') {
   const wasSettled = !!(last && last.hash !== d.hash && !last.risk && (!(last.mismatch || last.notProvable) || (known && known.hash === last.hash)) && r.passes >= (isDeep(m) ? 2 : 1));
   const extra = r.passes >= r.limit && wasSettled && mode === 'focused';
   if (r.passes >= r.limit && wasSettled && mode !== 'focused') fail(`not saved: ${doc}.md had settled; a change after that gets one focused pass (--mode focused) on the changed lines.`);
-  if (r.passes >= r.limit && !extra) fail(`not saved: ${doc}.md already has ${r.passes} doc-checker passes this round (the limit is ${r.limit}). Record what the last pass left as known issues (signoff.mjs known ${id} ${doc}); a developer accepts them at sign-off. A rewrite with /tech-plugin:document starts a new round.`);
+  if (r.passes >= r.limit && !extra) fail(`not saved: ${doc}.md already has ${r.passes} doc-checker passes this round (the limit is ${r.limit}). Record what the last pass left as known issues (signoff.mjs known ${id} ${doc}). A rewrite with /tech-plugin:document starts a new round.`);
   if (mode === 'focused' && !r.full) fail('not saved: the first pass of a round reads the whole document. Run a full pass first.');
   const n = (listChecks(home, id, doc).pop() || { n: 0 }).n + 1;
   const rel = path.join(checksDir(id), `${doc}-check-${n}.md`);
@@ -160,7 +161,7 @@ function recordKnown(home, id, doc) {
     '',
     `# Known issues: ${doc}.md of ${id}`,
     '',
-    `What doc-checker pass ${last.n} left open after the last allowed pass. They stay visible here: the reviewers read them before signing off, and the developer who approves the technical layer accepts them. The next /tech-plugin:document run of ${doc} gets this list and fixes them.`,
+    `What doc-checker pass ${last.n} left open after the last allowed pass. They stay visible here and do not stop the document being Checked. The next /tech-plugin:document run of ${doc} gets this list and fixes them.`,
     '',
     `## Mismatch (${st.lastCheck.mismatch})`,
     '',
@@ -208,25 +209,17 @@ function decide(home, id, { doc, q, answer, by, role }) {
   const all = readDecisions(home, id);
   const next = `D${all.length + 1}`;
   const f = path.join(docsDir(home), decisionsRel(id));
-  const head = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : `# Decisions: ${id}\n\nAnswers people gave to open questions, recorded by /tech-plugin:validate. The next /tech-plugin:document run cites them as "decision D<n>". Never edit an existing row; add a new decision instead.\n\n| ID | Document | Question | Asked | Answer | Decided by | Date |\n|---|---|---|---|---|---|---|\n`;
+  const head = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : `# Decisions: ${id}\n\nAnswers people gave to open questions, recorded by /tech-plugin:validate when someone answers. The next /tech-plugin:document run cites them as "decision D<n>". Never edit an existing row; add a new decision instead.\n\n| ID | Document | Question | Asked | Answer | Decided by | Date |\n|---|---|---|---|---|---|---|\n`;
   const cell = (s) => String(s).replace(/\|/g, '/').replace(/\n/g, ' ');
   writeDocs(home, decisionsRel(id), head.replace(/\n*$/, '\n') + `| ${next} | ${doc} | ${q} | ${cell(qq.text)} | ${cell(answer)} | ${cell(`${by} (${role})`)} | ${today()} |\n`);
-  // both layers already approved and this was the last open decision: Approved
-  const st = docState(home, id, doc);
-  if (st.people && st.technical && st.status !== 'Approved' && st.openQuestions.every((x) => x.decision)) {
-    fs.writeFileSync(d.f, joinDoc({ ...d.front, status: 'Approved' }, d.body));
-    syncDocStatus(home, id);
-  }
   return next;
 }
 
-// ------------------------------------------------------------------ approvals
+// ------------------------------------------------------------------ Checked
 
 export function docState(home, id, doc) {
   const d = readDoc(home, id, doc);
   if (!d) return { exists: false };
-  const ap = d.front.approvals || {};
-  const ok = (x) => !!(x && x.by && x.hash === d.hash);
   const checks = listChecks(home, id, doc);
   const last = checks[checks.length - 1];
   const decisions = readDecisions(home, id).filter((x) => x.doc === doc);
@@ -241,12 +234,12 @@ export function docState(home, id, doc) {
   const lc = last ? { pass: last.n, mode: last.mode, current: last.hash === d.hash, mismatch: last.mismatch, notProvable: last.notProvable, risk: last.risk } : null;
   const clean = !!(lc && lc.current && !lc.mismatch && !lc.notProvable && !lc.risk);
   const settled = !!(lc && lc.current && !lc.risk && (clean || (known && known.current)) && round.passes >= (deep ? 2 : 1) && round.full >= 1);
+  const info = docInfo(home, id, doc);
   return {
     exists: true,
-    status: d.front.status || 'Draft',
+    status: info.status || 'Draft',
     hash: d.hash,
-    people: ok(ap.people) ? ap.people : null,
-    technical: ok(ap.technical) ? ap.technical : null,
+    checked: info.checked || null,
     checkerPasses: checks.length,
     round,
     lastCheck: lc,
@@ -257,47 +250,49 @@ export function docState(home, id, doc) {
   };
 }
 
-function approve(home, id, doc, { layer, by, role }) {
-  const { m } = moduleOf(home, id);
-  if (!['people', 'technical'].includes(layer)) fail('--layer must be people or technical');
-  if (!by || !role) fail('--by NAME and --role ROLE are required: record who approved');
-  if (layer === 'people' && !PEOPLE_ROLES.test(role)) fail(`the people layer is approved by the owner, PO or BA (a non-technical reader), not "${role}"`);
-  if (layer === 'technical' && !TECH_ROLES.test(role)) fail(`the technical layer is approved by a developer, not "${role}"`);
-  const d = readDoc(home, id, doc);
-  if (!d) fail(`modules/${id}/${doc}.md does not exist`);
-  const problems = [];
-  const cd = checkDoc(d.f, home).filter((r) => r.level === 'FAIL').map((r) => `check-doc: ${r.name}`);
-  const pl = plainCheck(d.f, home).filter((r) => r.level === 'FAIL').map((r) => `plain: ${r.name}`);
-  problems.push(...cd, ...pl);
-  const st = docState(home, id, doc);
-  const deep = isDeep(m);
-  const accepted = !!(st.lastCheck && st.lastCheck.current && !st.lastCheck.risk && (st.lastCheck.mismatch || st.lastCheck.notProvable) && st.known && st.known.current);
-  if (!st.lastCheck) problems.push('no doc-checker report yet: run the doc-checker first');
-  else if (!st.lastCheck.current) problems.push('the document changed after the last doc-checker pass: check it again');
-  else if (st.lastCheck.risk) problems.push(`the last doc-checker pass found ${st.lastCheck.risk} risk item(s): remove them and check again`);
-  else if ((st.lastCheck.mismatch || st.lastCheck.notProvable) && !accepted) problems.push(`the last doc-checker pass found ${st.lastCheck.mismatch} mismatch, ${st.lastCheck.notProvable} not provable: fix them and check again, or once the pass limit is reached record them as known issues (signoff.mjs known)`);
-  if (deep && st.round.passes < 2) problems.push('a critical module needs two doc-checker passes');
-  if (st.lastCheck && !st.round.full) problems.push('no full doc-checker pass since the document was written: run one');
-  if (!st.readability) problems.push('no readability review yet');
-  if (layer === 'technical' && !st.people) problems.push('the people layer is approved first (owner or PO), then the technical layer');
-  if (problems.length) fail(`not approved: ${doc}.md\n  - ${problems.join('\n  - ')}`);
-  const front = { ...d.front, approvals: { ...(d.front.approvals || {}), [layer]: { by, role, on: today(), hash: d.hash, ...(accepted ? { known: st.known.items } : {}) } } };
-  const after = { ...st, [layer]: front.approvals[layer] };
-  const undecided = st.openQuestions.filter((q) => !q.decision);
-  if (after.people && after.technical && (!deep || !undecided.length)) front.status = 'Approved';
-  else if (after.people) front.status = 'Reviewed';
-  fs.writeFileSync(d.f, joinDoc(front, d.body));
+// Sets each document's status from its checks: Checked or Draft. A document
+// Approved by the old two-layer sign-off, for its current text, is left alone.
+export function markChecked(home, id) {
+  const out = {};
+  for (const doc of DOCS_ORDER) {
+    const d = readDoc(home, id, doc);
+    if (!d) continue;
+    const info = docInfo(home, id, doc);
+    if (info.broken) continue;
+    if (info.status === 'Approved') {
+      out[doc] = 'Approved';
+      continue;
+    }
+    const st = docState(home, id, doc);
+    let ready = st.settled && st.readability;
+    if (ready) ready = !checkDoc(d.f, home).some((r) => r.level === 'FAIL') && !plainCheck(d.f, home).some((r) => r.level === 'FAIL');
+    const front = { ...d.front };
+    if (ready) {
+      out[doc] = 'Checked';
+      if (info.status === 'Checked') continue;
+      delete front.approvals;
+      front.status = 'Checked';
+      front.checked = { on: today(), hash: d.hash, pass: st.lastCheck.pass, ...(st.known && st.known.current ? { known: st.known.items } : {}) };
+    } else {
+      out[doc] = 'Draft';
+      if ((front.status || 'Draft') === 'Draft') continue;
+      delete front.approvals;
+      front.status = 'Draft';
+      front.checked = null;
+    }
+    fs.writeFileSync(d.f, joinDoc(front, d.body));
+  }
   syncDocStatus(home, id);
-  return { status: front.status, known: accepted ? st.known : null, waiting: deep && after.people && after.technical && undecided.length ? undecided.map((q) => q.q) : [] };
+  return out;
 }
 
-// modules.yaml doc_status: none -> draft -> reviewed -> approved
+// modules.yaml doc_status: none -> draft -> checked (approved: all three
+// signed off under the old flow and unchanged since)
 export function syncDocStatus(home, id) {
-  const states = DOCS_ORDER.map((doc) => docState(home, id, doc));
+  const infos = DOCS_ORDER.map((doc) => docInfo(home, id, doc));
   let v = 'none';
-  if (states.some((s) => s.exists)) v = 'draft';
-  if (states.every((s) => s.exists && ['Reviewed', 'Approved'].includes(s.status) && s.people)) v = 'reviewed';
-  if (states.every((s) => s.exists && s.status === 'Approved' && s.people && s.technical)) v = 'approved';
+  if (infos.some((s) => s.exists)) v = 'draft';
+  if (infos.every((s) => s.exists && ['Checked', 'Approved'].includes(s.status))) v = infos.every((s) => s.status === 'Approved') ? 'approved' : 'checked';
   const f = path.join(docsDir(home), 'modules.yaml');
   const t = fs.readFileSync(f, 'utf8');
   const lines = t.split('\n');
@@ -315,77 +310,76 @@ export function syncDocStatus(home, id) {
   return v;
 }
 
-// The business flowchart is part of the people layer: it has no sign-off of
-// its own; the owner or PO reads it with the documents.
+// The business flowchart is shown with the documents; it has no status of its own.
 function flowchartLines(home, id) {
   const L = ['## Business flowchart', ''];
   const D = docsDir(home);
-  if (!fs.existsSync(path.join(D, diagRel(id, 'flowchart.md')))) return [...L, `Not drawn yet: \`/tech-plugin:diagram ${id}\`. Once drawn, the owner or PO reads it with the people layer.`, ''];
+  if (!fs.existsSync(path.join(D, diagRel(id, 'flowchart.md')))) return [...L, `Not drawn yet: \`/tech-plugin:diagram ${id}\`.`, ''];
   const facts = readJson(path.join(D, factsRelOf(id)));
   const s = diagramState(home, id, facts ? facts.hash : buildFacts(home, id).hash);
   const when = s.drawnAt ? s.drawnAt.slice(0, 10) : '?';
-  L.push(`- [ ] **Owner or PO:** does [the flowchart](../diagrams/flowchart.md) show how people move through the screens, with the names they use? Drawn on ${when}${s.state === 'up-to-date' ? '; it matches the code and the documents.' : `; **out of date** (${s.reasons.join('; ')}): redraw it with \`/tech-plugin:diagram ${id}\` first.`}`, '- To change a screen name, edit `diagrams/labels.yaml` (set `from: you`), then redraw.', '');
+  L.push(`- [The flowchart](../diagrams/flowchart.md) shows how people move through the screens. Drawn on ${when}${s.state === 'up-to-date' ? '; it matches the code and the documents.' : `; **out of date** (${s.reasons.join('; ')}): redraw it with \`/tech-plugin:diagram ${id}\` first.`}`, '- To change a screen name, edit `diagrams/labels.yaml` (set `from: you`), then redraw.', '');
   return L;
 }
 
 export function checklist(home, id) {
   const { m } = moduleOf(home, id);
   const deep = isDeep(m);
-  const L = [`# Review checklist: ${m.name}`, '', `Written by /tech-plugin:validate on ${today()}. ${deep ? '**Critical module** (money, security or clinical): two doc-checker passes, and a decision on every open question before Approved.' : 'Standard module: one doc-checker pass.'}`, ''];
-  L.push('| Document | Status | Doc-checker (last pass) | Readability | People layer (owner/PO) | Technical layer (developer) |', '|---|---|---|---|---|---|');
+  const marked = markChecked(home, id);
+  const L = [`# Checks: ${m.name}`, '', `Written by /tech-plugin:validate on ${today()}. ${deep ? '**Critical module** (money, security or clinical): two doc-checker passes.' : 'Standard module: one doc-checker pass.'} A document is Checked when its last pass is on its current text and clean (or what is left is listed as known issues) and the readability review is done. No sign-off is needed.`, ''];
+  L.push('| Document | Status | Doc-checker (last pass) | Readability |', '|---|---|---|---|');
   for (const doc of DOCS_ORDER) {
     const s = docState(home, id, doc);
     if (!s.exists) {
-      L.push(`| ${doc} | not written | | | | |`);
+      L.push(`| ${doc} | not written | | |`);
       continue;
     }
     const lc = s.lastCheck ? `pass ${s.lastCheck.pass}${s.lastCheck.mode === 'focused' ? ' (focused)' : ''}: ${s.lastCheck.mismatch} mismatch, ${s.lastCheck.notProvable} not provable${s.lastCheck.current ? '' : ' (older text)'}${s.known && s.known.current ? `; [${s.known.items} known issue(s)](${doc}-known.md)` : ''}` : 'not run';
-    L.push(`| [${doc}](../${doc}.md) | ${s.status} | ${lc} | ${s.readability ? 'done' : 'not run'} | ${s.people ? `${s.people.by} (${s.people.role}), ${s.people.on}` : 'waiting'} | ${s.technical ? `${s.technical.by} (${s.technical.role}), ${s.technical.on}` : 'waiting'} |`);
+    L.push(`| [${doc}](../${doc}.md) | ${s.status} | ${lc} | ${s.readability ? 'done' : 'not run'} |`);
   }
   L.push('', ...flowchartLines(home, id));
-  L.push('', '## What each reviewer does', '', '- **Owner or PO (people layer):** read everything above "Appendix A", and the business flowchart. Is it right, and can someone outside the team follow it? Answer the open questions addressed to you.', '- **Developer (technical layer):** check Appendix A and B: do the cited lines show what the statements say? Answer the open questions addressed to you. Where a document lists known issues, read them: approving the technical layer accepts them until the next rewrite.', '');
-  L.push('## Open questions', '');
+  L.push('## Open questions', '', 'They stay in the documents. Answering is optional; an answer is used the next time the document is written.', '');
   let any = false;
   for (const doc of DOCS_ORDER) {
     const s = docState(home, id, doc);
     if (!s.exists || !s.openQuestions.length) continue;
     any = true;
-    L.push(`### ${doc}`, '', '| Question | For | Decision |', '|---|---|---|');
-    for (const q of s.openQuestions) L.push(`| **${q.q}** ${q.text.replace(/\|/g, '/')} | ${q.role} | ${q.decision ? `${q.decision.id}: ${q.decision.answer.replace(/\|/g, '/')} (${q.decision.by})` : 'waiting'} |`);
+    L.push(`### ${doc}`, '', '| Question | For | Answer |', '|---|---|---|');
+    for (const q of s.openQuestions) L.push(`| **${q.q}** ${q.text.replace(/\|/g, '/')} | ${q.role} | ${q.decision ? `${q.decision.id}: ${q.decision.answer.replace(/\|/g, '/')} (${q.decision.by})` : 'open'} |`);
     L.push('');
   }
   if (!any) L.push('None.', '');
   writeDocs(home, path.join(checksDir(id), 'review-checklist.md'), L.join('\n'));
-  syncDocStatus(home, id);
+  return marked;
 }
+
+const statusText = (r) => DOCS_ORDER.filter((d) => r[d]).map((d) => `${d} ${r[d]}`).join(', ');
 
 function main() {
   const [cmd, id, third] = process.argv.slice(2);
   const a = parseArgs(process.argv.slice(3));
-  if (!a.home || !id) fail('usage: signoff.mjs <save-check|save-review|known|decide|approve|checklist|sync|status> <module> … --home HOME');
+  if (!a.home || !id) fail('usage: signoff.mjs <save-check|save-review|known|decide|checklist|sync|status> <module> … --home HOME');
   const home = real(a.home);
   moduleOf(home, id);
   if (cmd === 'save-check') {
     if (!a.input) fail('--input FILE is required');
     const r = saveCheck(home, id, third, real(a.input), a.checker, a.mode || 'full');
-    process.stdout.write(`saved ${r.rel}: ${r.mismatch} mismatch, ${r.notProvable} not provable, ${r.risk || 0} risk${r.clean ? ' (clean)' : ''}; ${r.left > 0 ? `${r.left} more pass(es) allowed this round` : 'no more passes this round'}\n`);
+    process.stdout.write(`saved ${r.rel}: ${r.mismatch} mismatch, ${r.notProvable} not provable, ${r.risk || 0} risk${r.clean ? ' (clean)' : ''}; ${r.left > 0 ? `${r.left} more pass(es) allowed this round` : 'no more passes this round'}\nstatus: ${statusText(markChecked(home, id))}\n`);
   } else if (cmd === 'known') {
     const r = recordKnown(home, id, third);
-    checklist(home, id);
-    process.stdout.write(`recorded ${r.items} known issue(s) in ${r.rel}: ${r.mismatch} mismatch, ${r.notProvable} not provable\n`);
+    process.stdout.write(`recorded ${r.items} known issue(s) in ${r.rel}: ${r.mismatch} mismatch, ${r.notProvable} not provable\nstatus: ${statusText(markChecked(home, id))}\n`);
   } else if (cmd === 'save-review') {
     if (!a.input) fail('--input FILE is required');
     const r = saveReview(home, id, third, real(a.input));
-    process.stdout.write(`saved ${r.rel}${r.unclear !== null ? `: ${r.unclear} thing(s) a non-technical reader could not follow` : ''}\n`);
+    process.stdout.write(`saved ${r.rel}${r.unclear !== null ? `: ${r.unclear} thing(s) a non-technical reader could not follow` : ''}\nstatus: ${statusText(markChecked(home, id))}\n`);
   } else if (cmd === 'decide') process.stdout.write(`recorded ${decide(home, id, a)} in modules/${id}/checks/decisions.md\n`);
-  else if (cmd === 'approve') {
-    const r = approve(home, id, third, a);
-    checklist(home, id);
-    process.stdout.write(`${third}.md: ${a.layer} layer approved by ${a.by} (${a.role}); status ${r.status}${r.known ? `; accepted ${r.known.items} known issue(s) (${r.known.rel})` : ''}${r.waiting.length ? `; Approved after a decision on ${r.waiting.join(', ')}` : ''}\n`);
-  } else if (cmd === 'checklist') {
-    checklist(home, id);
-    process.stdout.write(`wrote modules/${id}/checks/review-checklist.md\n`);
-  } else if (cmd === 'sync') process.stdout.write(`doc_status of ${id}: ${syncDocStatus(home, id)}\n`);
+  else if (cmd === 'checklist') {
+    const r = checklist(home, id);
+    process.stdout.write(`wrote modules/${id}/checks/review-checklist.md\nstatus: ${statusText(r)}\n`);
+  } else if (cmd === 'sync') {
+    markChecked(home, id);
+    process.stdout.write(`doc_status of ${id}: ${syncDocStatus(home, id)}\n`);
+  }
   else if (cmd === 'status') process.stdout.write(JSON.stringify(Object.fromEntries(DOCS_ORDER.map((d) => [d, docState(home, id, d)])), null, 2) + '\n');
   else fail('unknown command');
 }

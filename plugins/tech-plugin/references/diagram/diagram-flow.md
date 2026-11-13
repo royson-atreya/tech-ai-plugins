@@ -24,10 +24,12 @@
    - `flowchart.md`: the people layer, screens in business words, in parts when there are more than 25 screens;
    - `sequences.md`: the technical layer, one sequence diagram per PRD requirement whose evidence reaches an API;
    - `er.md`: the technical layer, the module's tables, with links between tables marked Inferred;
+   - beside each one with a diagram in it, a `.drawio` copy (`flowchart.drawio`, `sequences.drawio`, `er.drawio`) to open and rearrange in draw.io or diagrams.net;
    - `_stamp.json`: what they were drawn from, so later runs say "Already up to date".
 5. **Report** from the JSON, in at most 5 lines:
    - screens, arrows and parts;
    - sequence diagrams drawn, and the requirements with no API call (`withoutApi`);
-   - tables and the inferred links between them.
+   - tables and the inferred links between them;
+   - for each `keptDrawio` entry: "<file> was changed by someone, so it was kept; the new drawing is in <newFile>."
 
    With no PRD there are no sequence diagrams: suggest `/tech-plugin:document <module>`.

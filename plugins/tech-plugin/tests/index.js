@@ -6,3 +6,5 @@ import('./breakdown-tests.mjs');
 import('./map-tests.mjs');
 import('./document-tests.mjs');
 import('./diagram-tests.mjs');
+import('./work-tests.mjs');
+import('./next-tests.mjs');

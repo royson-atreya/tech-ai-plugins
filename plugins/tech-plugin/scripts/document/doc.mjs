@@ -6,7 +6,7 @@
 //   node doc.mjs status  <module> --home HOME     JSON: needs-first, critical/deep, and per
 //                                                 document (spec, brd, prd): missing |
 //                                                 up-to-date | facts-changed | input-changed,
-//                                                 status and sign-offs; `next` = what to write
+//                                                 status (Draft or Checked); `next` = what to write
 //   node doc.mjs prepare <module> <spec|brd|prd> --home HOME
 //                                                 JSON for the writer agent: paths, the stamp
 //                                                 to put on top, the IDs to keep; saves the
@@ -281,9 +281,18 @@ export function docInfo(home, id, doc) {
   }
   const front = parts.front || {};
   const hash = bodyHash(parts.body);
+  const set = front.status || 'Draft';
+  const checked = front.checked && front.checked.hash === hash ? front.checked : null;
+  const status = set === 'Checked' ? (checked ? 'Checked' : 'Draft') : set === 'Approved' ? (legacyApproved(front, hash) ? 'Approved' : 'Draft') : set === 'Reviewed' ? 'Draft' : set;
+  return { exists: true, front, hash, status, checked, changedSinceCheck: set !== 'Draft' && status === 'Draft' };
+}
+
+// Approved by the two-layer sign-off of tech-plugin 0.5 and earlier, for this
+// exact text. Such a document keeps its status until it is rewritten.
+export function legacyApproved(front, hash) {
   const ap = front.approvals || {};
-  const valid = (x) => x && x.by && x.hash === hash;
-  return { exists: true, front, hash, status: front.status || 'Draft', approvals: { people: valid(ap.people) ? ap.people : null, technical: valid(ap.technical) ? ap.technical : null }, changedSinceApproval: !!((ap.people && ap.people.hash !== hash) || (ap.technical && ap.technical.hash !== hash)) };
+  const ok = (x) => !!(x && x.by && x.hash === hash);
+  return front.status === 'Approved' && ok(ap.people) && ok(ap.technical);
 }
 
 // Whether a written document still matches the code facts and the documents
@@ -311,7 +320,7 @@ export function status(home, id, { force = false } = {}) {
     const f = docFreshness(home, id, doc, pack);
     const d = f.info;
     const state = force && d.exists && !d.broken ? 'forced' : f.state;
-    docs[doc] = { state, status: d.status || null, approvals: d.approvals || null, changedSinceApproval: !!d.changedSinceApproval, broken: d.broken || null };
+    docs[doc] = { state, status: d.status || null, checked: d.checked || null, changedSinceCheck: !!d.changedSinceCheck, broken: d.broken || null };
   }
   const next = DOCS_ORDER.find((d) => docs[d].state !== 'up-to-date') || 'up-to-date';
   const firstStale = DOCS_ORDER.find((d) => docs[d].state === 'facts-changed');
@@ -381,7 +390,7 @@ export function prepare(home, id, doc) {
     facts: st.facts.hash,
     inputs,
     writer: st.writer,
-    approvals: { people: null, technical: null },
+    checked: null,
   };
   const stampText = `---\n${toYaml(front).trimEnd()}\n---\n`;
   return {

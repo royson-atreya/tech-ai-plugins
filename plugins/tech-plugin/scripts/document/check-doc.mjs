@@ -4,8 +4,9 @@
 //
 //   node check-doc.mjs <doc.md> --home HOME
 //
-//  1. the stamp parses and has every field; status is Draft, Reviewed or Approved,
-//     and Reviewed/Approved only with a recorded sign-off for this exact text
+//  1. the stamp parses and has every field; status is Draft or Checked, and
+//     Checked only with a check record (validate writes it); a change after
+//     that is a warning: the document counts as a Draft again
 //  2. the ## headings are exactly the template's, in order
 //  3. "In short" has its four lines; its open-question count matches
 //  4. every open question has a number and a role
@@ -31,7 +32,7 @@ import { loadState } from '../breakdown/state.mjs';
 import { NEEDS, docRel, factsRelOf, idsIn, prevRel } from './doc.mjs';
 
 const CLASSES = ['Verified', 'Inferred', 'Assumption', 'Unknown'];
-const ROLE_RE = /^(owner|product owner|po|ba|business analyst|developer|dev|qa|tester|designer|admin|support|ops|operations|doctor|clinic|legal|finance|security)$/i;
+export const ROLE_RE = /^(owner|product owner|po|ba|business analyst|developer|dev|tech lead|architect|qa|tester|designer|admin|support|ops|operations|doctor|clinic|legal|finance|security)$/i;
 
 export function templateHeadings(doc) {
   const t = fs.readFileSync(path.join(PLUGIN_ROOT, 'references', 'document', `${doc}-template.md`), 'utf8');
@@ -56,6 +57,42 @@ function section(lines, title) {
   return out;
 }
 
+// Every `repo:path:lines` citation in the lines: the repo is one of the
+// system's, the file exists and is not secret, and each cited line is there
+// and not blank. Shared with check-work.mjs.
+export function checkCitations(lines, home) {
+  const st = loadState(home);
+  const repos = new Map(((st && st.repos) || []).map((r) => [r.name, path.resolve(home, r.path)]));
+  const cites = new Map();
+  lines.forEach((l, k) => {
+    for (const m of l.matchAll(/`([A-Za-z0-9_.-]+):([^`\s:]+(?:\.[A-Za-z0-9]+)?)(?::(\d+(?:[-,]\d+)*))?`/g)) if (repos.has(m[1])) cites.set(`${m[1]}:${m[2]}${m[3] ? ':' + m[3] : ''}`, { repo: m[1], p: m[2], lines: m[3], n: k });
+  });
+  const bad = [];
+  const readers = new Map();
+  for (const [c, x] of cites) {
+    if (!readers.has(x.repo)) readers.set(x.repo, makeReader(repos.get(x.repo), isSecretFor(repos.get(x.repo))));
+    const rd = readers.get(x.repo);
+    if (rd.isSecret(x.p)) {
+      bad.push(`${c}: cites a secret file`);
+      continue;
+    }
+    const t = rd.text(x.p, 8 * 1024 * 1024);
+    if (t === null) {
+      bad.push(`${c}: file not found`);
+      continue;
+    }
+    if (!x.lines) continue;
+    const fl = t.split('\n');
+    for (const part of x.lines.split(',')) {
+      const [a, b = a] = part.split('-').map(Number);
+      if (b < a) bad.push(`${c}: range runs backwards`);
+      else if (b > fl.length) bad.push(`${c}: the file has ${fl.length} lines`);
+      else if (!fl[a - 1] || !fl[a - 1].trim()) bad.push(`${c}: line ${a} is blank`);
+    }
+  }
+  return { count: cites.size, bad };
+}
+
 export function checkDoc(file, home) {
   const R = [];
   const add = (level, name, details = []) => R.push({ level, name, details });
@@ -74,7 +111,7 @@ export function checkDoc(file, home) {
   }
   add('PASS', 'the stamp parses');
   const off = parts.frontLines; // line numbers in reports are file lines
-  const missing = ['module', 'doc', 'title', 'status', 'date', 'commits', 'facts', 'inputs', 'approvals'].filter((k) => !(k in front));
+  const missing = ['module', 'doc', 'title', 'status', 'date', 'commits', 'facts', 'inputs'].filter((k) => !(k in front));
   add(missing.length ? 'FAIL' : 'PASS', 'stamp fields present', missing.length ? [`missing: ${missing.join(', ')}`] : []);
   const doc = front.doc;
   const id = front.module;
@@ -85,11 +122,18 @@ export function checkDoc(file, home) {
   const hash = bodyHash(parts.body);
   const ap = front.approvals || {};
   const valid = (x) => x && x.by && x.hash === hash;
-  if (!['Draft', 'Reviewed', 'Approved'].includes(front.status)) add('FAIL', 'status is Draft, Reviewed or Approved', [`got: ${front.status}`]);
-  else if (front.status === 'Reviewed' && !valid(ap.people)) add('FAIL', 'status Reviewed has a recorded people-layer sign-off for this text', ['only /tech-plugin:validate sets Reviewed, after the owner or PO approves']);
-  else if (front.status === 'Approved' && !(valid(ap.people) && valid(ap.technical))) add('FAIL', 'status Approved has both sign-offs for this text', ['only /tech-plugin:validate sets Approved']);
-  else add('PASS', `status is ${front.status}`);
-  if ((ap.people && ap.people.hash !== hash) || (ap.technical && ap.technical.hash !== hash)) add('WARN', 'changed since it was approved', ['the sign-off no longer applies; it needs approving again']);
+  const again = ['it counts as a Draft until /tech-plugin:validate checks it again'];
+  if (front.status === 'Draft') add('PASS', 'status is Draft');
+  else if (front.status === 'Checked') {
+    if (!front.checked || !front.checked.hash) add('FAIL', 'status Checked has a check record', ['only /tech-plugin:validate sets Checked, once the checks pass']);
+    else if (front.checked.hash !== hash) add('WARN', 'changed since it was checked', again);
+    else add('PASS', 'status is Checked');
+  } else if (front.status === 'Reviewed' || front.status === 'Approved') {
+    // the two-layer sign-off of tech-plugin 0.5 and earlier
+    if (!valid(ap.people) && !valid(ap.technical) && !(ap.people && ap.people.by) && !(ap.technical && ap.technical.by)) add('FAIL', `status ${front.status} has a recorded sign-off`, ['only /tech-plugin:validate sets a status, and it sets Checked']);
+    else if (!valid(ap.people) || (front.status === 'Approved' && !valid(ap.technical))) add('WARN', 'changed since it was approved', again);
+    else add('PASS', `status is ${front.status} (signed off before tech-plugin 0.6)`);
+  } else add('FAIL', 'status is Draft or Checked', [`got: ${front.status}`]);
 
   // 2. headings
   const want = templateHeadings(doc);
@@ -224,36 +268,8 @@ export function checkDoc(file, home) {
   }
 
   // 8. citations
-  const st = loadState(home);
-  const repos = new Map(((st && st.repos) || []).map((r) => [r.name, path.resolve(home, r.path)]));
-  const cites = new Map();
-  lines.forEach((l, k) => {
-    for (const m of l.matchAll(/`([A-Za-z0-9_.-]+):([^`\s:]+(?:\.[A-Za-z0-9]+)?)(?::(\d+(?:[-,]\d+)*))?`/g)) if (repos.has(m[1])) cites.set(`${m[1]}:${m[2]}${m[3] ? ':' + m[3] : ''}`, { repo: m[1], p: m[2], lines: m[3], n: k });
-  });
-  const badCites = [];
-  const readers = new Map();
-  for (const [c, x] of cites) {
-    if (!readers.has(x.repo)) readers.set(x.repo, makeReader(repos.get(x.repo), isSecretFor(repos.get(x.repo))));
-    const rd = readers.get(x.repo);
-    if (rd.isSecret(x.p)) {
-      badCites.push(`${c}: cites a secret file`);
-      continue;
-    }
-    const t = rd.text(x.p, 8 * 1024 * 1024);
-    if (t === null) {
-      badCites.push(`${c}: file not found`);
-      continue;
-    }
-    if (!x.lines) continue;
-    const fl = t.split('\n');
-    for (const part of x.lines.split(',')) {
-      const [a, b = a] = part.split('-').map(Number);
-      if (b < a) badCites.push(`${c}: range runs backwards`);
-      else if (b > fl.length) badCites.push(`${c}: the file has ${fl.length} lines`);
-      else if (!fl[a - 1] || !fl[a - 1].trim()) badCites.push(`${c}: line ${a} is blank`);
-    }
-  }
-  add(badCites.length ? 'FAIL' : 'PASS', `all ${cites.size} code citations exist`, badCites.slice(0, 20));
+  const cc = checkCitations(lines, home);
+  add(cc.bad.length ? 'FAIL' : 'PASS', `all ${cc.count} code citations exist`, cc.bad.slice(0, 20));
 
   // 9. secrets and personal data (the stamp is skipped: it holds commit ids)
   const skip = new Set(Array.from({ length: off }, (_, i) => i + 1));
