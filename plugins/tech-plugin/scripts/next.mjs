@@ -7,10 +7,13 @@
 //
 // In this order, the first that applies:
 //   restart     a newer tech-plugin is installed than this session runs
+//   build       a work item being built (implement, review) comes before a
+//               new breakdown: the build itself changes the code
 //   breakdown   no breakdown yet, one half done, or the code changed since
 //   sync        documents or diagrams no longer match the code, or new
 //               business documents arrived
-//   work item   a work item waits for its requirements or design
+//   work item   a work item waits for its requirements, design, plan, approval,
+//               build or review
 //   diagram     the system diagrams are not drawn yet
 //   document    the first module, in the suggested order, whose documents
 //               are not all Checked or whose diagrams are not drawn
@@ -38,6 +41,10 @@ const WORK = {
   'approve-requirement': ['requirement', 'approval of its requirements by the owner, PO or BA'],
   design: ['design', 'its design'],
   'approve-design': ['design', 'approval of its design by a developer or tech lead'],
+  task: ['task', 'its plan'],
+  'approve-plan': ['task', 'your approval of its plan (an APPROVED file and a feature branch: /tech-plugin:task prints both commands)'],
+  implement: ['implement', 'its code to be built'],
+  review: ['review', 'its review and handoff'],
 };
 
 // What a module still needs: null when its documents are all Checked (or
@@ -58,6 +65,14 @@ export function nextStep(cwd) {
   if (!bd.found) return step('breakdown', 'breakdown', null, 'First the plugin reads your code and splits it into business modules. It stops twice for you: to confirm the tech stack and to approve the module list.', { home: bd.home || null });
   const home = bd.home;
   const wasDone = bd.stages && bd.stages['6'] && bd.stages['6'].status === 'done';
+  // a build in progress changes the code: finish it before breaking down again
+  if (bd.next !== 'up-to-date' && wasDone && loadExisting(home)) {
+    const building = workItems(home).items.find((i) => i.next === 'implement' || i.next === 'review');
+    if (building) {
+      const [skill, what] = WORK[building.next];
+      return step(building.next, skill, building.id, `Work item ${building.id} "${building.title}" is being built and is waiting for ${what}. Break the code down again after it is merged.`, { home });
+    }
+  }
   if (bd.next !== 'up-to-date') return step('breakdown', 'breakdown', wasDone ? '--refresh' : null, wasDone ? `The code changed since the breakdown: ${bd.message}` : `The breakdown is not finished: ${bd.message}`, { home });
   const my = loadExisting(home);
   if (!my || !Array.isArray(my.modules)) return step('breakdown', 'breakdown', null, 'There is no approved module list yet.', { home });

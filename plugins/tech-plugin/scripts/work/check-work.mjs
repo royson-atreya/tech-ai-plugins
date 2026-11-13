@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Mechanical checks of a work-item document (impact, requirement or design).
+// Mechanical checks of a work-item document (impact, requirement, design or plan).
 // plain.mjs then checks the wording of the part everyone reads.
 //
 //   node check-work.mjs <work/ID/doc.md> --home HOME [--part requirements|architecture]
@@ -22,6 +22,12 @@
 //  8. every cited repo:path:line exists, is not a secret file, and is not blank
 //  9. no key-like strings and no personal data
 // 10. written from the current request, documents and code of its modules
+// plan: a Draft (APPROVED approves it, never the stamp); steps <ID>-Tnn, each
+// with what it covers, its files (`repo:path` (change|new|delete), existing
+// unless new, never a secret file), what to do and a check (a command in
+// backticks or "by hand: …"; never an install or a git command that changes
+// anything); every requirement covered; a bug's first step adds a test and
+// section 2 says how to reproduce it, with evidence
 // --part requirements: before the stories are written (story checks skipped);
 // --part architecture: before the API, data and coverage sections are written.
 // Prints PASS / FAIL / WARN lines; exits 1 if any FAIL.
@@ -36,6 +42,13 @@ import { loadExisting } from '../breakdown/modules.mjs';
 import { docRel } from '../document/doc.mjs';
 import { ROLE_RE, checkCitations, layers } from '../document/check-doc.mjs';
 import { LEVELS, WORK_DOCS, docState, idsOf, prevWorkRel, reEsc, readWorkDoc } from './work.mjs';
+import { parseSteps } from './build.mjs';
+import { isSecretFor } from '../breakdown/common.mjs';
+import { loadState } from '../breakdown/state.mjs';
+
+const INSTALL_RE = /\b(npm|pnpm|yarn|bun)\s+(i|install|add|ci|update|upgrade)\b|\bcomposer\s+(install|require|update)\b|\bpip3?\s+install\b|\b(poetry|pipenv|uv)\s+(add|install|sync)\b|\b(flutter|dart)\s+pub\s+(get|add|upgrade)\b|\bpod\s+install\b|\bgem\s+install\b|\bbundle\s+install\b|\bgo\s+(get|mod\s+download)\b|\bcargo\s+(add|install)\b/i;
+const GIT_WRITE_RE = /\bgit\s+(?!(diff|status|log|show|grep|blame|ls-files|rev-parse)\b)\w+/i;
+const TEST_FILE_RE = /(^|\/)(tests?|spec|specs|__tests__|test_driver|integration_test)\/|[._-](test|spec)\.[a-z]+$|Test\.(php|java|kt)$|_test\.(go|dart|py)$/i;
 
 const CLASSES = ['Verified', 'Inferred', 'Assumption', 'Unknown'];
 const SOURCE_RE = /`[^`]+`|request\.md|glossary\.md|system\.yaml|modules\.yaml|decision D\d+|\b(spec|brd|prd|impact|requirement) E\d+|\bBR-\d+|\b[A-Za-z0-9][\w.-]*-[RSD]\d{2,}\b/;
@@ -43,6 +56,7 @@ const BOX = {
   impact: ['The change', 'Who notices', 'Risk', 'Size', 'Level', 'Open questions'],
   requirement: ['What it adds', 'Who uses it', 'Requirements', 'Stories', 'Open questions'],
   design: ['Approach', 'Changes', 'Decisions', 'Open questions'],
+  plan: ['What changes', 'Steps', 'Repos', 'Risk', 'Open questions'],
 };
 const ALLOWED = { Risk: ['Low', 'Medium', 'High', 'Critical'], Size: ['S', 'M', 'L', 'XL'], Level: LEVELS };
 
@@ -94,17 +108,19 @@ export function checkWork(file, home, { part = null } = {}) {
   add('PASS', 'the stamp parses');
   const off = parts.frontLines;
   const at = (k) => `line ${k + 1 + off}`;
-  const missing = ['work', 'doc', 'title', 'status', 'date', 'modules', 'facts', 'inputs', 'approval'].filter((k) => !(k in front));
+  const missing = (front.doc === 'plan' ? ['work', 'doc', 'title', 'status', 'date', 'modules', 'facts', 'inputs', 'kind', 'repos'] : ['work', 'doc', 'title', 'status', 'date', 'modules', 'facts', 'inputs', 'approval']).filter((k) => !(k in front));
   add(missing.length ? 'FAIL' : 'PASS', 'stamp fields present', missing.length ? [`missing: ${missing.join(', ')}`] : []);
   const doc = front.doc;
   const id = String(front.work || '');
-  if (!WORK_DOCS.includes(doc)) {
-    add('FAIL', 'stamp doc is impact, requirement or design', [`got: ${doc}`]);
+  if (![...WORK_DOCS, 'plan'].includes(doc)) {
+    add('FAIL', 'stamp doc is impact, requirement, design or plan', [`got: ${doc}`]);
     return R;
   }
   const hash = bodyHash(parts.body);
   const ap = front.approval;
-  if (!['Draft', 'Approved'].includes(front.status)) add('FAIL', 'status is Draft or Approved', [`got: ${front.status}`]);
+  if (doc === 'plan' && front.status !== 'Draft') add('FAIL', 'a plan is a Draft', ['a person approves a plan with its APPROVED file (/tech-plugin:task prints the command), never in the stamp']);
+  else if (doc === 'plan') add('PASS', 'status is Draft');
+  else if (!['Draft', 'Approved'].includes(front.status)) add('FAIL', 'status is Draft or Approved', [`got: ${front.status}`]);
   else if (front.status === 'Approved' && doc === 'impact') add('FAIL', 'status matches its approval', ['an impact is never approved: it stays a Draft']);
   else if (front.status === 'Approved' && !(ap && ap.by && ap.hash === hash)) add('FAIL', 'status matches its approval', [ap && ap.by ? 'changed since it was approved: set it back to Draft and approve it again' : 'only work.mjs approve sets Approved']);
   else add('PASS', `status is ${front.status}`);
@@ -137,6 +153,7 @@ export function checkWork(file, home, { part = null } = {}) {
   const reqs = blocks(lines, new RegExp(`^### (${P}-R\\d{2,}):(.*)$`));
   const stories = blocks(lines, new RegExp(`^### (${P}-S\\d{2,}):(.*)$`));
   const decisions = blocks(lines, new RegExp(`^### (${P}-D\\d{2,}):(.*)$`));
+  const steps = doc === 'plan' ? parseSteps(parts.body, id) : [];
 
   // 3. In short
   const box = [];
@@ -158,6 +175,7 @@ export function checkWork(file, home, { part = null } = {}) {
     if (part !== 'requirements') count('Stories', stories.filter((b) => !removed(b)).length);
   }
   if (doc === 'design') count('Decisions', decisions.filter((b) => !removed(b)).length);
+  if (doc === 'plan') count('Steps', steps.filter((s) => !s.removed).length);
   add(boxProblems.length ? 'FAIL' : 'PASS', `"In short" box complete (${qs.length} open questions)`, boxProblems);
   add(qProblems.length ? 'FAIL' : 'PASS', 'every open question has a number and a role', qProblems);
 
@@ -270,16 +288,61 @@ export function checkWork(file, home, { part = null } = {}) {
       else add(cov.length ? 'FAIL' : 'PASS', `every requirement is covered by the design (${want.length})`, cov);
     }
   }
+  if (doc === 'plan') {
+    const st = loadState(home);
+    const repos = new Map(((st && st.repos) || []).map((r) => [r.name, path.resolve(home, r.path)]));
+    const liveSteps = steps.filter((s) => !s.removed);
+    const bad = [];
+    for (const s of liveSteps) {
+      if (!s.covers) bad.push(`${s.id}: needs a **Covers:** line (the requirements it builds, or "the bug")`);
+      if (!s.files.length) bad.push(`${s.id}: needs **Files:** with lines like "- \`repo:path/to/file\` (change)"`);
+      if (!s.do) bad.push(`${s.id}: needs a **Do:** line saying what to change`);
+      if (!s.check) bad.push(`${s.id}: needs a **Check:** line: a command in backticks, or "by hand: …"`);
+      else if (!s.command && !s.byHand) bad.push(`${s.id}: the check starts with a command in backticks, or with "by hand:"`);
+      if (s.command && INSTALL_RE.test(s.command)) bad.push(`${s.id}: the check installs packages; the guard blocks that. Put the install under "Risks and how to undo it" for the person to run`);
+      if (s.command && GIT_WRITE_RE.test(s.command)) bad.push(`${s.id}: the check runs git; a person does every git change`);
+      for (const f of s.files) {
+        const abs = repos.get(f.repo);
+        if (!abs) {
+          bad.push(`${s.id}: \`${f.repo}:${f.path}\`: ${f.repo} is not a repo of this system (${[...repos.keys()].join(', ')})`);
+          continue;
+        }
+        if (isSecretFor(abs)(f.path)) bad.push(`${s.id}: \`${f.repo}:${f.path}\` is a secret file: never change it in a plan`);
+        const exists = fs.existsSync(path.join(abs, f.path));
+        if (f.kind !== 'new' && !exists) bad.push(`${s.id}: \`${f.repo}:${f.path}\` does not exist; mark it "(new)" if the step creates it`);
+      }
+    }
+    if (!liveSteps.length) add('FAIL', `steps ${id}-Tnn present`, [`no "### ${id}-T01: …" headings in Appendix B`]);
+    else add(dup(steps).length || bad.length ? 'FAIL' : 'PASS', `${liveSteps.length} step(s) ${id}-Tnn: each with what it covers, its files, what to do and a check`, [...dup(steps).map((d) => `${d} is defined twice`), ...bad]);
+    if (front.kind === 'bug') {
+      const first = liveSteps[0];
+      const bugBad = [];
+      if (first && !first.files.some((f) => TEST_FILE_RE.test(f.path))) bugBad.push(`${first.id}: the first step of a bug adds a test that fails because of the bug (a file under tests/ or named *test*/*spec*)`);
+      if (first && !first.command) bugBad.push(`${first.id}: its check is the command that runs that test`);
+      const cause = sectionOf(lines, /^## 2\. Cause of the bug$/).map((x) => x.t);
+      if (!cause.some((l) => /^\s*1\.\s+\S/.test(l))) bugBad.push('section 2: give the steps that show the bug as a numbered list ("1. …")');
+      if (!cause.some((l) => /\[E\d+\]/.test(l))) bugBad.push('section 2: the cause carries evidence tags ([E#])');
+      add(bugBad.length ? 'FAIL' : 'PASS', 'a bug: how to show it, its cause, and a failing test first', bugBad);
+    } else {
+      const rq = readWorkDoc(home, id, 'requirement');
+      const want = rq ? blocks(rq.body.split('\n'), new RegExp(`^### (${P}-R\\d{2,}):(.*)$`)).filter((b) => !removed(b)).map((b) => b.id) : [];
+      const covered = new Set(liveSteps.flatMap((s) => [...String(s.covers || '').matchAll(new RegExp(`${P}-R\\d{2,}`, 'g'))].map((m) => m[0])));
+      const cov = [...want.filter((r) => !covered.has(r)).map((r) => `${r} is covered by no step`), ...[...covered].filter((r) => !want.includes(r)).map((r) => `${r} is not a requirement of ${id}`)];
+      if (!rq) add('FAIL', 'every requirement is covered by a step', ['requirement.md is missing']);
+      else add(cov.length ? 'FAIL' : 'PASS', `every requirement is covered by a step (${want.length})`, cov);
+    }
+  }
   const prevFile = path.join(docsDir(home), prevWorkRel(id, doc));
   if (fs.existsSync(prevFile) && doc !== 'impact') {
     const prev = fs.readFileSync(prevFile, 'utf8');
-    const kinds = doc === 'requirement' ? ['R', 'S'] : ['D'];
+    const kinds = doc === 'requirement' ? ['R', 'S'] : doc === 'plan' ? ['T'] : ['D'];
     const lost = kinds.flatMap((k) => idsOf(prev, id, k)).filter((x) => !new RegExp(`^### ${reEsc(x)}:`, 'm').test(parts.body));
     add(lost.length ? 'FAIL' : 'PASS', 'no ID of the previous version lost', lost.map((x) => `${x} is gone: keep it, or mark it "Removed (reason)"`));
   }
 
   // 8. citations
-  const cc = checkCitations(lines, home);
+  // a file a step creates does not exist yet: its line is not a citation
+  const cc = checkCitations(doc === 'plan' ? lines.map((l) => (/^\s*-\s*`[^`]+`\s*\(new\)/.test(l) ? '' : l)) : lines, home);
   add(cc.bad.length ? 'FAIL' : 'PASS', `all ${cc.count} code citations exist`, cc.bad.slice(0, 20));
 
   // 9. secrets and personal data (the stamp holds hashes and is skipped)

@@ -90,6 +90,31 @@ It lists the documents and diagrams that no longer match the code, refreshes the
 
 With a Zoho Sprints item, give its number instead of the words: `/tech-plugin:impact NT-I42`.
 
+**5. Build it: plan, code, review**
+
+```
+/tech-plugin:task W-001         # the plan: steps, the files each changes, the test for each
+/tech-plugin:implement W-001    # writes the code step by step and runs each step's test
+/tech-plugin:review W-001       # code and security review, fixes, then handoff.md
+```
+
+`task` ends by printing two commands **you** run in your own terminal to approve the plan. Claude can never run them:
+
+```
+git -C ~/Atreya/web switch -c feature/w-001-download-the-report
+printf 'plan %s\nby %s\n' 3f9a01c2b4d5e6f7 "Royson" > ~/Atreya/web/sdlc-docs/work/W-001/APPROVED
+```
+
+If the plan changes after you approve it, `implement` stops and gives you the new line. `review` ends with `handoff.md`: what changed, how to check it by hand, the review results and a ready commit message. You commit and push; after the merge, run `/tech-plugin:sync`.
+
+**A bug** skips requirements and design. Describe it, or give its Zoho number:
+
+```
+/tech-plugin:task "The export button on the patient page does nothing"
+```
+
+The plan's first step is a test that fails because of the bug, so the fix is proven.
+
 ## All commands
 
 | Command | Example | What you get |
@@ -105,6 +130,9 @@ With a Zoho Sprints item, give its number instead of the words: `/tech-plugin:im
 | `impact` | `/tech-plugin:impact "request"` | `work/W-001/impact.md` and an HTML report |
 | `requirement` | `/tech-plugin:requirement W-001` | `work/W-001/requirement.md` |
 | `design` | `/tech-plugin:design W-001` | `work/W-001/design.md` |
+| `task` | `/tech-plugin:task W-001` or `/tech-plugin:task "bug in words"` | `work/W-001/plan.md` and the 2 commands to approve it |
+| `implement` | `/tech-plugin:implement W-001` | The code, step by step, each step's test run |
+| `review` | `/tech-plugin:review W-001` | Reviews, fixes, `work/W-001/handoff.md` and a ready commit message |
 
 All paths are inside `sdlc-docs/`.
 
@@ -139,13 +167,13 @@ tech-plugin: BLOCKED [git] git commit is not on the read-only list (status, diff
 
 ### Letting it edit code (for one work item)
 
-You do these steps yourself:
+Code is edited only when all three are true, in each repo the plan changes:
 
-1. Create an empty file `sdlc-docs/work/W-001/APPROVED`.
-2. Put `W-001` in `sdlc-docs/work/.active`.
-3. Switch to a feature branch (not `main` or `master`).
+1. `sdlc-docs/work/.active` names the work item (`/tech-plugin:task` writes it);
+2. `sdlc-docs/work/W-001/APPROVED` exists: **you** create it, with the line `/tech-plugin:task` prints;
+3. the repo is on a feature branch (not `main` or `master`): **you** switch to it.
 
-Delete `APPROVED` to close the gate again.
+`/tech-plugin:review` closes the gate again when it writes the handoff. To close it earlier, delete `sdlc-docs/work/.active`.
 
 ## Something went wrong?
 
@@ -155,6 +183,7 @@ Delete `APPROVED` to close the gate again.
 | "A newer tech-plugin is installed" | Restart Claude Code. |
 | "Already up to date" | Nothing changed. Add `--force` to redo it anyway. |
 | A command is blocked | Read the rule in the message. See "What it will never do". |
+| "needs install: …" during implement | Run that install yourself, then `/tech-plugin:implement W-001` again. |
 | Not sure what to do next | Run `/tech-plugin:next`. |
 | Anything else | Run `/tech-plugin:doctor`. |
 

@@ -2,6 +2,41 @@
 
 All notable changes to tech-plugin. Versions follow semantic versioning; the version is set only in `.claude-plugin/plugin.json`.
 
+## 0.7.0 (2026-11-14)
+
+Build step 8 of 11: `task`, `implement`, `review` and the three worker tiers.
+
+### Added
+
+- **`/tech-plugin:task <ID | "bug in words" | Zoho bug>`** plans the build in `work/<ID>/plan.md` (`references/work/plan-template.md`).
+  - Steps `<ID>-T01…`, each with what it covers, its files (`repo:path` change, new or delete), what to do and the check that proves it.
+  - Plus what will change, risks and how to undo it, and open questions.
+  - A feature is planned after its requirements are approved (and its design, unless Quick).
+  - **A bug skips impact, requirements and design**, is Quick, and its plan's first step is a test that fails because of the bug.
+  - `task` writes `sdlc-docs/work/.active` and prints the two commands the person runs in their own terminal: a feature branch, and `APPROVED` holding the plan's hash.
+- **`/tech-plugin:implement <ID>`** builds an approved plan step by step.
+  - A worker changes only the step's files and runs its check through Bash, where the guard sees it.
+  - Results go to `work/<ID>/checks/` (keys hidden) and `progress.json`, so a later run continues.
+  - It stops with the install command when a step needs a package.
+  - **A plan changed after approval is not approved**: implement stops and prints the new `APPROVED` line.
+- **`/tech-plugin:review <ID>`**:
+  - collects what changed since the plan's base commits (`sdlc-docs/` left out, new files included, secret files skipped and listed, unplanned files flagged);
+  - has `code-reviewer` (Sonnet, high) and `security-reviewer` (Opus, high) read it in parallel;
+  - has a worker fix blocking findings (at most two rounds);
+  - writes `work/<ID>/handoff.md` (what changed, how to check it by hand, open points, files, steps and checks, reviews) and a ready commit message with the commands for the person;
+  - closes the gate by removing `.active`.
+- **Worker tiers:** `worker-light` (Haiku, low), `worker-standard` (Sonnet, medium) and `worker-deep` (Opus, high), with the rules for each job in `references/work/worker-rules.md`.
+  - `build.mjs tier` picks one: standard by default; deep for High or Critical risk; never deep for a Quick item; up one tier after two failures; it stops at the top.
+  - `sdlc-docs/config.json` may map a tier to another agent (`"tiers"`).
+- **`scripts/work/build.mjs`:** `prepare`, `approval` (the guard's own `gate()` plus the plan hash), `progress`, `tier`, `record`, `changes`, `save-review`, `handoff`.
+- **Tests:** `tests/build-tests.mjs` (39 tests): a bug from its words to the handoff, with the gate checked against the real guard. 886 tests in all.
+
+### Changed
+
+- **Work items** have a kind (`work.mjs new --kind bug`). The next step after planning runs `task → approve-plan → implement → review → done`. `work.mjs decide` accepts `--doc plan`.
+- **A build's own code changes** no longer send it back to the breakdown or the plan. `/tech-plugin:next` continues a build in progress before suggesting a new breakdown.
+- `check-work.mjs` checks plans too.
+
 ## 0.6.0 (2026-11-13)
 
 Build step 7 of 11: `impact`, `requirement` and `design`. Also: easier to use (`/tech-plugin:next`, `document` in one go), draw.io files for every diagram, no sign-off for module documents, and a shorter README.

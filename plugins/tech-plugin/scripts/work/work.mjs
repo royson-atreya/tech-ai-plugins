@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 // Work items: one folder per piece of new work, <home>/sdlc-docs/work/<ID>/,
-// for /tech-plugin:impact, /tech-plugin:requirement and /tech-plugin:design.
+// for /tech-plugin:impact, /tech-plugin:requirement and /tech-plugin:design;
+// build.mjs adds the plan, the build and the handoff (/tech-plugin:task,
+// /tech-plugin:implement, /tech-plugin:review).
 //
-//   node work.mjs new       --request-file F --home HOME [--id ID] [--source zoho|person]
+//   node work.mjs new       --request-file F --home HOME [--id ID] [--source zoho|person] [--kind bug]
+//         a bug goes straight to /tech-plugin:task: no requirements or design
 //         creates work/<ID>/request.md and status.json. The file's first line,
 //         "# <title>", is the title. ID: the tracker's item number, or the next
 //         W-001. The file is read, checked for keys and personal data, and deleted
@@ -18,8 +21,8 @@
 //   node work.mjs level     <ID> <Quick|Standard|Full> --by NAME --home HOME
 //   node work.mjs decisions --home HOME          rewrites sdlc-docs/decisions/README.md
 //
-// Never writes work/.active or an APPROVED file: those belong to /tech-plugin:task
-// and to people. Writes only below <home>/sdlc-docs/.
+// Never writes work/.active (build.mjs does) or an APPROVED file (people do).
+// Writes only below <home>/sdlc-docs/.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -27,14 +30,17 @@ import { fileURLToPath } from 'node:url';
 import { bodyHash, joinDoc, splitDoc } from '../lib/frontmatter.mjs';
 import { scanText } from '../lib/redact.mjs';
 import { pluginUpdate } from '../lib/version.mjs';
-import { PLUGIN_ROOT, docsDir, fail, parseArgs, readJson, real, today, writeDocs } from '../breakdown/common.mjs';
+import { PLUGIN_ROOT, commitOf, docsDir, fail, parseArgs, readJson, real, today, writeDocs } from '../breakdown/common.mjs';
 import { loadExisting } from '../breakdown/modules.mjs';
-import { status as breakdownStatus } from '../breakdown/state.mjs';
+import { loadState, status as breakdownStatus } from '../breakdown/state.mjs';
+import { currentBranch } from '../lib/paths.mjs';
 import { DOCS_ORDER, buildFacts, docRel, writeFacts } from '../document/doc.mjs';
+import { buildState } from './build.mjs';
 
 export const WORK_DOCS = ['impact', 'requirement', 'design'];
 // the documents each one is written from (besides the request)
-export const INPUTS = { impact: [], requirement: ['impact'], design: ['impact', 'requirement'] };
+export const INPUTS = { impact: [], requirement: ['impact'], design: ['impact', 'requirement'], plan: ['impact', 'requirement', 'design'] };
+export const KINDS = ['feature', 'bug'];
 export const LEVELS = ['Quick', 'Standard', 'Full'];
 export const APPROVERS = {
   requirement: { re: /^(owner|product owner|po|ba|business analyst)$/i, who: 'the owner, PO or BA' },
@@ -74,7 +80,7 @@ export function loadItem(home, id) {
   return { id, dir, ...st };
 }
 
-export function newItem(home, { id, requestFile, source = 'person' }) {
+export function newItem(home, { id, requestFile, source = 'person', kind = 'feature' }) {
   requireModules(home);
   if (!requestFile) fail('usage: new --request-file F --home HOME [--id ID] [--source zoho|person]');
   if (!fs.existsSync(requestFile)) fail(`${requestFile} not found`);
@@ -91,9 +97,10 @@ export function newItem(home, { id, requestFile, source = 'person' }) {
   const wid = id ? checkId(id) : nextLocalId(home);
   if (fs.existsSync(path.join(docsDir(home), workRel(wid)))) fail(`work item ${wid} already exists: continue it with /tech-plugin:requirement ${wid}, or give another ID`);
   if (!['zoho', 'person'].includes(source)) fail('--source must be zoho or person');
+  if (!KINDS.includes(kind)) fail('--kind must be feature or bug');
   const oneLine = String(title).replace(/\s+/g, ' ').trim().slice(0, 120);
-  writeDocs(home, workRel(wid, 'request.md'), `# ${oneLine}\n\n> **Work item:** ${wid} · **From:** ${source === 'zoho' ? 'Zoho Sprints' : 'a person'} · **Date:** ${today()}\n\n${text.trim()}\n`);
-  writeDocs(home, workRel(wid, 'status.json'), JSON.stringify({ schema: 1, id: wid, title: oneLine, source, created: new Date().toISOString(), level: null, levelBy: null, modules: [] }, null, 1) + '\n');
+  writeDocs(home, workRel(wid, 'request.md'), `# ${oneLine}\n\n> **Work item:** ${wid}${kind === 'bug' ? ' (bug)' : ''} · **From:** ${source === 'zoho' ? 'Zoho Sprints' : 'a person'} · **Date:** ${today()}\n\n${text.trim()}\n`);
+  writeDocs(home, workRel(wid, 'status.json'), JSON.stringify({ schema: 1, id: wid, title: oneLine, source, kind, created: new Date().toISOString(), level: kind === 'bug' ? 'Quick' : null, levelBy: null, modules: [] }, null, 1) + '\n');
   return refresh(home, wid);
 }
 
@@ -151,7 +158,26 @@ export function stampFor(home, id, doc, modules) {
   const now = currentInputs(home, id);
   const inputs = { request: now.request };
   for (const n of INPUTS[doc]) inputs[n] = now[n];
-  return { work: id, doc, title: item.title, status: 'Draft', date: today(), level: item.level || null, modules, facts: factsOf(home, modules), inputs, approval: null };
+  const front = { work: id, doc, title: item.title, status: 'Draft', date: today(), level: item.level || null, modules, facts: factsOf(home, modules), inputs, approval: null };
+  // a plan is approved by the APPROVED file, not in its stamp; it records the
+  // commit each repo was at, so review can show exactly what changed since
+  if (doc === 'plan') {
+    delete front.approval;
+    return { ...front, kind: item.kind || 'feature', repos: repoBases(home) };
+  }
+  return front;
+}
+
+// Every repo of the system: its commit and branch now.
+export function repoBases(home) {
+  const st = loadState(home);
+  const out = {};
+  for (const r of (st && st.repos) || []) {
+    const abs = path.resolve(home, r.path);
+    if (!fs.existsSync(abs)) continue;
+    out[r.name] = { base: commitOf(abs) || null, branch: currentBranch(abs) };
+  }
+  return out;
 }
 
 export const stampText = (front) => joinDoc(front, '').trimEnd();
@@ -196,7 +222,7 @@ export function docState(home, id, doc) {
 
 // ------------------------------------------------------------------ status
 
-export function nextStep(level, s) {
+function planningStep(level, s) {
   const { impact, requirement, design } = s;
   if (!impact.exists && !requirement.exists) return 'impact';
   if (!requirement.exists) return 'requirement';
@@ -208,13 +234,29 @@ export function nextStep(level, s) {
   return 'task';
 }
 
+// b: build.mjs buildState. A bug goes straight to the plan.
+export function nextStep(level, s, b = null, kind = 'feature') {
+  // once the build started, its own code changes do not send it back to planning
+  const pre = kind === 'bug' || (b && b.started) ? 'task' : planningStep(level, s);
+  if (pre !== 'task' || !b) return pre;
+  if (!b.plan.exists || b.plan.state !== 'up-to-date') return 'task';
+  if (b.handedOff) return 'done';
+  if (!b.approved) return 'approve-plan';
+  if (b.done < b.total) return 'implement';
+  return 'review';
+}
+
 const NEXT_TEXT = {
   impact: (id) => `/tech-plugin:impact ${id}`,
   requirement: (id) => `/tech-plugin:requirement ${id}`,
   'approve-requirement': (id) => `the owner, PO or BA approves the requirements (/tech-plugin:requirement ${id})`,
   design: (id) => `/tech-plugin:design ${id}`,
   'approve-design': (id) => `a developer or tech lead approves the design (/tech-plugin:design ${id})`,
-  task: (id) => `/tech-plugin:task ${id} (build step 8)`,
+  task: (id) => `/tech-plugin:task ${id}`,
+  'approve-plan': (id) => `you approve the plan: create its APPROVED file and a feature branch (/tech-plugin:task ${id} prints both commands)`,
+  implement: (id) => `/tech-plugin:implement ${id}`,
+  review: (id) => `/tech-plugin:review ${id}`,
+  done: (id) => `nothing: ${id} is built and handed off (see work/${id}/handoff.md)`,
 };
 
 // Recomputes status.json from the documents.
@@ -224,25 +266,29 @@ export function refresh(home, id) {
   const fromImpact = s.impact.level && LEVELS.includes(s.impact.level) ? s.impact.level : null;
   const level = item.levelBy ? item.level : fromImpact || item.level || null;
   const modules = (s.impact.exists && s.impact.modules.length ? s.impact.modules : null) || (s.requirement.exists && s.requirement.modules.length ? s.requirement.modules : null) || item.modules || [];
-  const next = nextStep(level, s);
+  const kind = item.kind || 'feature';
+  const b = buildState(home, id);
+  const next = nextStep(level, s, b, kind);
   const st = {
     schema: 1,
     id,
     title: item.title,
     source: item.source || 'person',
+    kind,
     created: item.created || null,
     level,
     levelBy: item.levelBy || null,
     modules,
     docs: Object.fromEntries(WORK_DOCS.map((d) => [d, s[d].exists ? { status: s[d].status, state: s[d].state, approvedBy: s[d].approved ? `${s[d].approved.by} (${s[d].approved.role})` : null } : null])),
+    build: { plan: b.plan.exists ? b.plan.state : null, approved: b.approved, steps: `${b.done}/${b.total}`, handedOff: b.handedOff },
     next,
     updatedAt: new Date().toISOString(),
   };
   writeDocs(home, workRel(id, 'status.json'), JSON.stringify(st, null, 1) + '\n');
-  return { ...st, states: s, nextText: NEXT_TEXT[next](id), dir: path.join(docsDir(home), workRel(id)) };
+  return { ...st, states: s, buildState: b, nextText: NEXT_TEXT[next](id), dir: path.join(docsDir(home), workRel(id)) };
 }
 
-function needsBreakdown(home) {
+export function needsBreakdown(home) {
   const upd = pluginUpdate(PLUGIN_ROOT);
   if (upd) return { next: 'restart', message: upd.message };
   const bd = breakdownStatus(home);
@@ -253,14 +299,17 @@ function needsBreakdown(home) {
 
 export function status(home, id) {
   const stop = needsBreakdown(home);
-  if (stop) return { id, ...stop };
+  // the code changes while a work item is built: that is not a reason to break it down again
+  if (stop && !(stop.next === 'breakdown' && buildState(home, id).started)) return { id, ...stop };
   const r = refresh(home, id);
   const msg = (d) => {
     const x = r.states[d];
     if (!x.exists) return `${d}: not written`;
     return `${d}: ${x.status}${x.approved ? ` (approved by ${x.approved.by})` : x.changedSinceApproval ? ' (changed since it was approved)' : ''}${x.state === 'stale' ? `; out of date: ${x.reasons.join('; ')}` : ''}`;
   };
-  return { ...r, message: `${id} "${r.title}": ${WORK_DOCS.map(msg).join(' · ')}. Next: ${r.nextText}.` };
+  const b = r.buildState;
+  const parts = [...(r.kind === 'bug' ? [] : WORK_DOCS.map(msg)), ...(b.plan.exists ? [`plan: ${b.plan.state}${b.approved ? ', approved' : ''}, ${b.done}/${b.total} steps done${b.handedOff ? ', handed off' : ''}`] : [])];
+  return { ...r, message: `${id} "${r.title}"${r.kind === 'bug' ? ' (bug)' : ''}: ${parts.length ? parts.join(' · ') : 'no plan yet'}. Next: ${r.nextText}.` };
 }
 
 export function list(home) {
@@ -292,7 +341,7 @@ export function writerPack(home, id, doc, modules) {
     moduleDocs[m] = { card: path.join(D, 'modules', m, 'module.md'), facts: path.join(D, 'modules', m, '_facts.md') };
     for (const x of DOCS_ORDER) if (fs.existsSync(path.join(D, docRel(m, x)))) moduleDocs[m][x] = path.join(D, docRel(m, x));
   }
-  const keepIds = doc === 'requirement' ? [...idsOf(prev, id, 'R'), ...idsOf(prev, id, 'S')] : doc === 'design' ? idsOf(prev, id, 'D') : [];
+  const keepIds = doc === 'requirement' ? [...idsOf(prev, id, 'R'), ...idsOf(prev, id, 'S')] : doc === 'design' ? idsOf(prev, id, 'D') : doc === 'plan' ? idsOf(prev, id, 'T') : [];
   const check = (part) => `node "${path.join(SCRIPTS, 'work', 'check-work.mjs')}" "${out}" --home "${home}"${part ? ` --part ${part}` : ''}`;
   return {
     work: id,
@@ -300,7 +349,7 @@ export function writerPack(home, id, doc, modules) {
     out,
     stamp: stampText(front),
     template: path.join(PLUGIN_ROOT, 'references', 'work', `${doc}-template.md`),
-    rules: [path.join(PLUGIN_ROOT, 'references', 'document', 'writing-rules.md'), path.join(PLUGIN_ROOT, 'references', 'work', 'work-rules.md')],
+    rules: [path.join(PLUGIN_ROOT, 'references', 'document', 'writing-rules.md'), path.join(PLUGIN_ROOT, 'references', 'work', 'work-rules.md'), ...(doc === 'plan' ? [path.join(PLUGIN_ROOT, 'references', 'work', 'worker-rules.md')] : [])],
     inputs,
     modules: moduleDocs,
     glossary: path.join(D, 'glossary.md'),
@@ -313,7 +362,7 @@ export function writerPack(home, id, doc, modules) {
   };
 }
 
-function moduleList(home, given) {
+export function moduleList(home, given) {
   const known = new Map(requireModules(home).modules.map((m) => [m.id, m]));
   const mods = [...new Set(String(given).split(/[\s,]+/).filter(Boolean))];
   const bad = mods.filter((m) => !known.has(m));
@@ -334,7 +383,7 @@ export function prepare(home, id, doc, { modules = null, force = false } = {}) {
     if (!s.requirement.exists) fail(`write the requirements first: /tech-plugin:requirement ${id}`);
     if (s.requirement.state !== 'up-to-date') fail(`requirement.md is out of date (${s.requirement.reasons.join('; ')}): refresh it with /tech-plugin:requirement ${id} first`);
     if (!s.requirement.approved) warn.push('the requirements are not approved yet: the design may have to change with them');
-    if (item.level === 'Quick' && !force) return { work: id, doc, quick: true, message: `${id} is a Quick change: it needs no design. Next: /tech-plugin:task ${id} (build step 8). To write one anyway, run /tech-plugin:design ${id} --force.` };
+    if (item.level === 'Quick' && !force) return { work: id, doc, quick: true, message: `${id} is a Quick change: it needs no design. Next: /tech-plugin:task ${id}. To write one anyway, run /tech-plugin:design ${id} --force.` };
   }
   const mods = modules ? moduleList(home, modules) : item.modules.length ? item.modules : null;
   if (!mods) fail(`no modules for ${id} yet: run /tech-plugin:impact ${id}, or name them (--modules a,b)`);
@@ -371,7 +420,7 @@ export function decide(home, id, { doc, q, answer, answerFile, by, role }) {
     fs.rmSync(answerFile, { force: true });
   }
   if (!doc || !q || !answer || !by || !role) fail('usage: decide <ID> --doc D --q Q1 --answer-file F --by NAME --role ROLE --home HOME');
-  if (!WORK_DOCS.includes(doc)) fail('--doc must be impact, requirement or design');
+  if (![...WORK_DOCS, 'plan'].includes(doc)) fail('--doc must be impact, requirement, design or plan');
   const d = readWorkDoc(home, id, doc);
   if (!d) fail(`work/${id}/${doc}.md does not exist`);
   const qq = questionsOf(d.body).find((x) => x.q === q);
@@ -453,7 +502,7 @@ async function main() {
   if (!fs.existsSync(docsDir(home))) fail(`${home} has no sdlc-docs/; run /tech-plugin:breakdown first`);
   const out = (x) => process.stdout.write(JSON.stringify(x, null, 2) + '\n');
   const [id, x] = a._;
-  if (cmd === 'new') return out(newItem(home, { id: a.id, requestFile: a['request-file'], source: a.source || 'person' }));
+  if (cmd === 'new') return out(newItem(home, { id: a.id, requestFile: a['request-file'], source: a.source || 'person', kind: a.kind || 'feature' }));
   if (cmd === 'list') return out(list(home));
   if (cmd === 'decisions') return out(decisionsIndex(home));
   if (!id) fail(usage);

@@ -4,7 +4,7 @@ The detailed reference for people who build or troubleshoot the plugin. For ever
 
 An SDLC/STLC toolbox for Claude Code that takes any software project from "understand what we have" to "release it safely", with a person approving every step that leads to code changes. Commands are `/tech-plugin:<command>`; each product repo gets its own notebook folder, `<repo>/sdlc-docs/`.
 
-**Status: 0.6.0, build step 7 of 11.** This version contains the safety guard, the session banner, `next`, `doctor`, `breakdown`, `document`, `validate`, `diagram`, `sync`, `impact`, `requirement` and `design`. The other commands come in later steps (see `docs/PLAN.md` in the marketplace repo).
+**Status: 0.7.0, build step 8 of 11.** This version contains the safety guard, the session banner, `next`, `doctor`, `breakdown`, `document`, `validate`, `diagram`, `sync`, `impact`, `requirement`, `design`, `task`, `implement` and `review`. The other commands come in later steps (see `docs/PLAN.md` in the marketplace repo).
 
 ## Install from the local marketplace
 
@@ -47,6 +47,9 @@ Then run `/tech-plugin:doctor`. Don't load the plugin into a session you are usi
 | `/tech-plugin:impact <ID \| "request">` | Starts a work item from a Zoho Sprints item or your words. Finds the modules the change reaches, the other apps and documents that depend on them, the risk, a rough size and the proposed level (Quick, Standard or Full). Writes `work/<ID>/impact.md` and an HTML report. |
 | `/tech-plugin:requirement <ID>` | Turns the request into testable requirements with acceptance criteria, asks the owner or PO about every gap, then writes user stories. The owner, PO or BA approves it. |
 | `/tech-plugin:design <ID>` | Writes how it is built: the approach, decisions with their options (ADRs), and the screen, API and data changes, with every requirement covered. A developer or tech lead approves it. |
+| `/tech-plugin:task <ID \| "bug">` | Plans the build in `work/<ID>/plan.md`: steps, the files each changes, the requirements each covers, the check that proves it. Prints the two commands a person runs to approve it. A bug starts here. |
+| `/tech-plugin:implement <ID>` | Builds an approved plan step by step with worker agents, runs each step's check, and records the results; continues where it stopped. |
+| `/tech-plugin:review <ID>` | Collects what changed, has a code and a security reviewer read it, has a worker fix blocking findings, writes `work/<ID>/handoff.md` and closes the gate. |
 
 All the commands run on Haiku at low effort and are manual-only (`disable-model-invocation`), so they add nothing to the context until you run them. The steps that need judgement go to agents:
 - **Grouping code into modules:** `module-proposer`, Opus at high effort.
@@ -54,6 +57,7 @@ All the commands run on Haiku at low effort and are manual-only (`disable-model-
 - **Checking:** `doc-checker`, with `doc-checker-deep` for those modules; and `readability-reviewer`.
 - **Screen names for diagrams:** `diagram-labeller`, Sonnet at low effort.
 - **Planning new work:** `impact-analyst`, `requirement-analyst` and `design-architect`, Opus at high effort, for the judgement; `story-writer` and `design-writer`, Sonnet at medium effort, for the writing.
+- **Building:** three worker tiers, `worker-light` (Haiku, low), `worker-standard` (Sonnet, medium) and `worker-deep` (Opus, high), chosen by `build.mjs tier`; `code-reviewer` (Sonnet, high) and `security-reviewer` (Opus, high), read-only.
 
 ## breakdown
 
@@ -261,7 +265,57 @@ The flowchart has no status of its own: `validate` lists it in `checks/review-ch
 - A document goes out of date when the request, a document it was written from, or the code of its modules changes. An approval holds only for the exact text approved.
 - Approval is refused while a check fails, an open question has no answer, or the document is out of date.
 
-These commands never write `work/.active` or `APPROVED`: building starts with `/tech-plugin:task` (step 8).
+These commands never write `work/.active` or `APPROVED`.
+
+## task, implement and review
+
+```
+/tech-plugin:task W-001                 # the plan, then the 2 commands you run to approve it
+/tech-plugin:task "Export does nothing" # a bug: a new work item, straight to the plan
+/tech-plugin:implement W-001            # the code, step by step
+/tech-plugin:review W-001               # reviews, fixes, handoff.md
+```
+
+**What comes first.** A feature is planned once its requirements are approved, and its design too unless it is Quick. A bug (`work.mjs new --kind bug`, or `task` with the bug in words or a Zoho bug) skips impact, requirements and design and is Quick.
+
+**task** (`references/work/task-flow.md`):
+- `build.mjs prepare` gives the planner the inputs, the fact packs, `profile.md`, the test commands breakdown found, and a stamp that records each repo's commit and branch. A bug with no modules named gets the ones its words point at.
+- A worker writes `plan.md` (`plan-template.md`): "In short" (what changes, steps, repos, risk, open questions), what will change, the cause of a bug (how to show it, as a numbered list, with evidence), risks and how to undo it, open questions, evidence, and the steps `<ID>-T01…`.
+- Each step has `**Covers:**`, `**Files:**` (`` `repo:path` `` with `(change)`, `(new)` or `(delete)`), `**Do:**`, `**Check:**` (a command in backticks, or "by hand: …") and an optional `**Tier:**`.
+- `check-work.mjs` checks the plan:
+  - every requirement is covered by a step;
+  - the files exist unless new, and none is a secret file;
+  - no check installs packages or runs git;
+  - a bug's first step adds a test, and its check runs it.
+- `build.mjs approval --activate` writes `sdlc-docs/work/.active` in each repo the plan changes, and prints what the person runs: `git switch -c feature/…` when the repo is on a protected branch, and `printf 'plan <hash>\nby <name>\n' > …/APPROVED`. A multi-repo plan needs both in each repo.
+
+**The gate.** `approval` asks the guard's own `gate()` (`.active`, `APPROVED`, a feature branch) and checks that `APPROVED` names this plan's hash. A plan changed after approval is not approved. Once the gate is open, workers may edit code and run commands in that repo; installs and git stay blocked.
+
+**implement** (`references/work/implement-flow.md`): for each step, `build.mjs tier` names the worker:
+- the standard tier by default; light when the step asks for it; deep for High or Critical risk;
+- never deep for a Quick item;
+- two failures on a tier move the step up one; two at the highest allowed tier stop and ask the person;
+- `sdlc-docs/config.json` may map a tier to another agent: `"tiers": { "deep": "…" }`.
+
+The worker changes only the step's files and runs its check through Bash, where the guard sees it. The plugin never runs a plan's commands itself. `build.mjs record` saves each reply (keys hidden) in `work/<ID>/checks/` and the result in `progress.json`, so a later run continues. A step that needs a package stops with the install command for the person.
+
+**review** (`references/work/review-flow.md`):
+1. `build.mjs changes` collects, per repo, the diff from the plan's base commit to the working tree. It leaves out `sdlc-docs/`, includes new files, skips secret files (listed, not shown), and flags files no step names.
+2. `code-reviewer` and `security-reviewer` read it in parallel. Their reports end with `Summary: N findings · B blocking` and are saved per round in `work/<ID>/review/`.
+3. Blocking findings go to a worker (`fix`), then a second round; no more than two.
+4. `build.mjs handoff` writes `handoff.md`:
+   - In short;
+   - what changed;
+   - how to check it by hand (the acceptance criteria, or the bug's steps);
+   - open points (blocking findings left, unplanned files, skipped secret files);
+   - the files with line counts;
+   - steps, requirements and checks;
+   - the reviews;
+   - a commit message in `_state/work/<ID>/commit-message.txt`, with the `git add`, `commit` and `push` commands for the person.
+
+   It then removes `.active`, which closes the gate.
+
+**While building.** The build changes the code, so "code changed since the breakdown" does not send a started build back to the breakdown or the plan. `status` and `next` keep it on `implement` and `review`. After the merge, `/tech-plugin:next` suggests `breakdown --refresh` and `sync`.
 
 ## The safety guard
 
@@ -289,11 +343,11 @@ The Bash check understands chains (`&&`, `||`, `;`, `|`), `$( )` and backticks, 
 
 A person, not Claude, opens the gate for one work item:
 
-1. Write the work item ID into `sdlc-docs/work/.active` (Claude may do this).
-2. Create `sdlc-docs/work/<ID>/APPROVED` yourself. Claude can never create, change or delete a file named `APPROVED`.
+1. `sdlc-docs/work/.active` names the work item: `/tech-plugin:task` writes it (Claude may).
+2. Create `sdlc-docs/work/<ID>/APPROVED` yourself, with the line `/tech-plugin:task` prints (`plan <hash>` and your name). Claude can never create, change or delete a file named `APPROVED`. The guard needs only the file. `/tech-plugin:implement` also needs the hash to match the current plan.
 3. Switch to a feature branch yourself (Claude cannot run `git checkout`/`switch`).
 
-Remove `APPROVED` or switch back to `main` to close the gate again.
+`/tech-plugin:review` removes `.active` when it writes the handoff. Remove `APPROVED` or `.active`, or switch back to `main`, to close the gate earlier.
 
 ### Project settings
 
@@ -344,6 +398,7 @@ node --test tests/
   It checks detection fact by fact, runs stages 1–2 through the scripts the way the command does, and proves that no secret file is opened and nothing outside `sdlc-docs/` changes.
 - `tests/document-tests.mjs` builds the Laravel + Flutter fixtures through `breakdown` (`tests/golden-doc.mjs`). It checks the fact pack, the status and freshness rules, both checks on good and broken sample documents, ID stability, the Checked rules, redaction, the definitions and the guard.
 - `tests/diagram-tests.mjs` runs the same fixtures through `diagram` and `sync`. It checks screen names (from the spec, and the plain-name check), the flowchart, sequence and ER diagrams, the system diagrams, the draw.io copies (well formed, the same boxes and arrows, layout, edited files kept), freshness, the sync table, business documents, and the portal (escaping, folds, links, rebuilds). It also checks the review checklist, the definitions, the guard, and that nothing outside `sdlc-docs/` changes.
+- `tests/build-tests.mjs` takes a bug on the same fixtures (with real commits) from its words to a handoff. It checks prepare, every plan check, the approval gate against the real guard (blocked, wrong plan version, protected branch, open, closed again), tiers and escalation, results and progress, change collection (planned, unplanned, new and secret files), reviews, the handoff, that a build's own code changes do not send it back to the breakdown, and that the plugin never commits or branches.
 - `tests/work-tests.mjs` runs the same fixtures through `impact`, `requirement` and `design`. It checks work items and IDs, the request's personal-data check, module ranking, the impact pack and report, every check on good and broken sample documents, freshness, decisions, approvals and their roles, the decisions index, the definitions, the guard, and that nothing outside `sdlc-docs/` changes.
 - `tests/map-tests.mjs` adds real code to those fixtures (`tests/golden-map.mjs`) plus a Go service. It checks:
   - every reader against exact routes, screens, calls and tables, and the Laravel parser on edge cases;
@@ -374,7 +429,7 @@ scripts/lib/graph.mjs        graphify wrapper and graph queries; lib/modules.mjs
 scripts/document/            doc (fact pack, status, prepare), check-doc, plain, signoff, glossary
 scripts/diagram/             diagram (labels, module diagrams, freshness), system (block diagram, journeys), mermaid helpers, drawio (draw.io copies and layout)
 scripts/sync/                sync (status table, business documents), portal (Markdown renderer, static pages)
-scripts/work/                work (items, status, prepare, decisions, approvals), impact (candidates, pack, report), check-work
+scripts/work/                work (items, status, prepare, decisions, approvals), impact (candidates, pack, report), check-work, build (plan pack, gate, progress, tiers, changes, reviews, handoff)
 scripts/lib/readers/behaviour.mjs  validation rules, messages, page labels; lib/redact.mjs keys and personal data
 skills/next/SKILL.md         the next command
 skills/doctor/SKILL.md       the doctor command
@@ -387,8 +442,11 @@ agents/readability-reviewer.md  reads the people layer as a non-technical person
 agents/diagram-labeller.md   writes plain screen names into labels.yaml (Sonnet, low effort)
 skills/diagram, skills/sync  the diagram and sync commands; flows in references/diagram/ and references/sync/
 skills/impact, requirement, design  planning new work; flows, templates and rules in references/work/
+skills/task, implement, review  building it; flows, the plan template and worker rules in references/work/
 agents/impact-analyst.md, requirement-analyst.md, design-architect.md  judgement (Opus, high effort)
 agents/story-writer.md, design-writer.md  stories and design details (Sonnet, medium effort)
+agents/worker-light|standard|deep.md  the three worker tiers (Haiku low, Sonnet medium, Opus high)
+agents/code-reviewer.md, security-reviewer.md  read-only reviews (Sonnet high, Opus high)
 references/document/         writing rules, spec/BRD/PRD templates, jargon list, flows
 config/defaults.json         secret patterns, protected branches, safe-command lists, blocked hosts
 tests/                       guard, doctor and breakdown tests (node --test tests/)

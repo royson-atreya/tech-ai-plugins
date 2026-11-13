@@ -18,4 +18,5 @@ Each piece of new work has a folder in the home repo: `sdlc-docs/work/<ID>/`.
 - **Answers to open questions:** write the answer to `<home>/sdlc-docs/_state/answer-in.md`, then `work.mjs decide <ID> --doc <doc> --q Q1 --answer-file <that file> --by "<name>" --role <role> --home <home>`.
 - **Approval:** only when the person says so, with their name and role: `work.mjs approve <ID> <requirement|design> --by "<name>" --role <role> --home <home>`. The requirements are approved by the owner, PO or BA; the design by a developer or tech lead. The script refuses while a check fails, an open question has no answer, or the document is out of date. A changed document needs approving again.
 - **Level:** `work.mjs level <ID> <Quick|Standard|Full> --by "<name>" --home <home>` when the person changes the level the impact proposed. A Quick item needs no design.
-- These commands never write `work/.active` or an `APPROVED` file: those come with /tech-plugin:task.
+- **Bugs:** add `--kind bug` to `work.mjs new`. A bug needs no impact, requirements or design: /tech-plugin:task plans it directly.
+- These commands never write an `APPROVED` file: a person creates it, with the line /tech-plugin:task prints. `build.mjs approval --activate` writes `work/.active`; the handoff removes it.
