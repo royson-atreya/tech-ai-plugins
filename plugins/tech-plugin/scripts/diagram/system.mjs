@@ -11,7 +11,7 @@ import path from 'node:path';
 import { docsDir, fail, readJson, today, writeDocs } from '../breakdown/common.mjs';
 import { factsStamps, loadLinks, loadSystem } from '../breakdown/load.mjs';
 import { loadExisting } from '../breakdown/modules.mjs';
-import { label, nid, sha } from './mermaid.mjs';
+import { idRegistry, label, nid, sha } from './mermaid.mjs';
 
 export const SYSTEM_RENDERER = 1;
 export const SYSTEM_FILES = ['block.md', 'journeys.md'];
@@ -65,9 +65,10 @@ function blockMd(sys, links, my) {
   const name = (s.system && s.system.name) || 'The system';
   const people = b.users ? String(b.users) : Array.isArray(b.roles) && b.roles.length ? b.roles.join(', ') : 'People';
   const M = ['```mermaid', 'flowchart LR', `  people(("${label(people)}"))`];
+  const id = idRegistry();
   const ev = [];
   const apps = [...sys.apps.values()];
-  for (const a of apps) M.push(`  ${nid('app', a.id)}["${label(appKindLabel(a.kind))}<br/>${label(a.id)}"]`);
+  for (const a of apps) M.push(`  ${id('app', a.id)}["${label(appKindLabel(a.kind))}<br/>${label(a.id)}"]`);
   const counts = new Map();
   const outside = new Map();
   for (const c of links.calls || []) {
@@ -83,29 +84,29 @@ function blockMd(sys, links, my) {
   if (outside.size) M.push('  outside["Server outside this breakdown"]');
   const withDb = apps.filter((a) => (a.tables || []).length);
   const onDevice = (a) => a.tables.every((t) => t.local);
-  for (const a of withDb) M.push(`  ${nid('db', a.id)}[("${onDevice(a) ? `Data kept on the device` : `Database of ${label(a.id)}`}")]`);
+  for (const a of withDb) M.push(`  ${id('db', a.id)}[("${onDevice(a) ? `Data kept on the device` : `Database of ${label(a.id)}`}")]`);
   const ext = [...new Set(apps.flatMap((a) => (a.externals && a.externals.systems ? a.externals.systems.map((x) => x.system) : [])))];
-  for (const e of ext) M.push(`  ${nid('ext', e)}(("${label(e)}"))`);
+  for (const e of ext) M.push(`  ${id('ext', e)}(("${label(e)}"))`);
   const front = apps.filter((a) => (a.screens || []).length);
   for (const a of front) {
-    M.push(`  people --> ${nid('app', a.id)}`);
+    M.push(`  people --> ${id('app', a.id)}`);
     ev.push(`- People → ${a.id}: ${a.screens.length} screen(s), e.g. \`${a.repo}:${a.screens[0].cite}\``);
   }
   for (const [k, v] of counts) {
     const [x, y] = k.split('>');
-    M.push(`  ${nid('app', x)} -->|"asks for data"| ${nid('app', y)}`);
+    M.push(`  ${id('app', x)} -->|"asks for data"| ${id('app', y)}`);
     ev.push(`- ${x} → ${y}: ${v.n} call(s) linked to its routes, e.g. \`${v.cite}\``);
   }
   for (const [x, v] of outside) {
-    M.push(`  ${nid('app', x)} -->|"asks for data"| outside`);
+    M.push(`  ${id('app', x)} -->|"asks for data"| outside`);
     ev.push(`- ${x} → server outside this breakdown: ${v.n} call(s), e.g. \`${v.cite}\``);
   }
   for (const a of withDb) {
-    M.push(`  ${nid('app', a.id)} --> ${nid('db', a.id)}`);
+    M.push(`  ${id('app', a.id)} --> ${id('db', a.id)}`);
     ev.push(`- ${a.id} → its database: ${a.tables.length} table(s), e.g. \`${a.repo}:${a.tables[0].cite}\``);
   }
   for (const a of apps) for (const x of (a.externals && a.externals.systems) || []) {
-    M.push(`  ${nid('app', a.id)} -.-> ${nid('ext', x.system)}`);
+    M.push(`  ${id('app', a.id)} -.-> ${id('ext', x.system)}`);
     const f = x.files[0];
     ev.push(`- ${a.id} → ${x.system}: used in ${x.files.length} file(s), e.g. \`${a.repo}:${f.file}:${f.lines[0]}\``);
   }

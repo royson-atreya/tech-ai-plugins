@@ -27,14 +27,15 @@ import { pluginUpdate } from '../lib/version.mjs';
 import { normUri, shapeOf } from '../lib/readers/common.mjs';
 import { PLUGIN_ROOT, docsDir, fail, parseArgs, readJson, real, today, writeDocs } from '../breakdown/common.mjs';
 import { loadSystem } from '../breakdown/load.mjs';
-import { status as breakdownStatus } from '../breakdown/state.mjs';
+import { loadState, stampKey, status as breakdownStatus } from '../breakdown/state.mjs';
+import { loadExisting } from '../breakdown/modules.mjs';
 import { docInfo, docRel, factsRelOf, moduleOf, writeFacts } from '../document/doc.mjs';
 import { ALLOWED_CAMEL, codeIn } from '../document/plain.mjs';
-import { cells, evidenceOf, hits, label, msg, nid, oneCite, resolveTags, section, sha, tagsIn } from './mermaid.mjs';
+import { cells, evidenceOf, hits, idRegistry, label, msg, oneCite, resolveTags, section, sha, tagsIn } from './mermaid.mjs';
 import { drawSystem, systemState } from './system.mjs';
 
 // Bump when the drawings change for the same input: every diagram is then stale.
-export const RENDERER = 1;
+export const RENDERER = 2;
 export const MAX_SCREENS = 25;
 const MAX_WORDS = 8;
 export const diagRel = (id, f) => path.join('modules', id, 'diagrams', f);
@@ -137,7 +138,7 @@ export function prepareLabels(home, id) {
     facts: path.join(D, 'modules', id, '_facts.md'),
     spec: fs.existsSync(path.join(D, docRel(id, 'spec'))) ? path.join(D, docRel(id, 'spec')) : null,
     glossary: path.join(D, 'glossary.md'),
-    screens: todo.slice(0, 80),
+    screens: todo,
     check: `node "${path.join(PLUGIN_ROOT, 'scripts', 'diagram', 'diagram.mjs')}" check-labels ${id} --home "${home}"`,
   };
 }
@@ -168,14 +169,32 @@ export function inputsOf(home, id, factsHash) {
     const d = docInfo(home, id, doc);
     return d.exists ? d.hash || null : null;
   };
-  return { facts: factsHash, spec: docHash('spec'), prd: docHash('prd'), labels: fs.existsSync(f) ? sha(fs.readFileSync(f, 'utf8')) : null, renderer: RENDERER };
+  // the flowchart draws other modules' screens and routes as their boxes; the
+  // sequences and the ER read every app's routes, handlers and tables
+  const my = loadExisting(home) || { modules: [] };
+  const index = (my.modules || []).map((m) => [m.id, m.name, m.screens || [], m.routes || [], m.web_routes || []]);
+  const st = loadState(home) || {};
+  const codeMap = { repos: Object.fromEntries((st.repos || []).map((r) => [r.name, stampKey(r.mapped)])), linked: ((st.stages || {})['4'] || {}).at || null };
+  return {
+    facts: factsHash,
+    spec: docHash('spec'),
+    brd: docHash('brd'),
+    prd: docHash('prd'),
+    labels: fs.existsSync(f) ? sha(fs.readFileSync(f, 'utf8')) : null,
+    modules: sha(JSON.stringify(index)),
+    codeMap: sha(JSON.stringify(codeMap)),
+    renderer: RENDERER,
+  };
 }
 
 const REASONS = {
   facts: 'the code facts changed',
   spec: 'the spec changed (screen names may come from it)',
+  brd: 'the BRD changed (PRD evidence may point into it)',
   prd: 'the PRD changed (sequence diagrams follow its requirements)',
   labels: 'screen names in labels.yaml changed',
+  modules: 'the module list changed (a module was renamed, or screens or routes moved)',
+  codeMap: 'the code map was read or linked again',
   renderer: 'tech-plugin draws diagrams differently now',
 };
 
@@ -184,7 +203,10 @@ export function diagramState(home, id, factsHash) {
   const st = readJson(path.join(D, diagRel(id, '_stamp.json')));
   if (!st) return { state: 'missing', reasons: [], drawnAt: null };
   const now = inputsOf(home, id, factsHash);
-  const reasons = Object.keys(REASONS).filter((k) => (st.inputs || {})[k] !== now[k]).map((k) => REASONS[k]);
+  let changed = Object.keys(REASONS).filter((k) => (st.inputs || {})[k] !== now[k]);
+  // a new renderer redraws everything; its other inputs are not news
+  if (changed.includes('renderer')) changed = ['renderer'];
+  const reasons = changed.map((k) => REASONS[k]);
   if (MODULE_FILES.some((f) => !fs.existsSync(path.join(D, diagRel(id, f))))) reasons.push('a diagram file is missing');
   return { state: reasons.length ? 'stale' : 'up-to-date', reasons, drawnAt: st.drawnAt || null };
 }
@@ -336,7 +358,9 @@ export function parts(screens) {
 
 function flowchartMd(m, pack, graph, labels, counts) {
   const nameOf = (k) => labels.get(k) || 'Screen not named yet';
-  const node = (k) => (k.startsWith('s:') ? nid('s', k.slice(2)) : nid('m', k.slice(2)));
+  const reg = idRegistry();
+  for (const s of pack.screens) reg('s', keyOf(s));
+  const node = (k) => reg(k.startsWith('s:') ? 's' : 'm', k.slice(2));
   const incoming = new Set(graph.edges.map((e) => e.to));
   const P = parts(pack.screens);
   const partOf = new Map();
@@ -412,13 +436,17 @@ function readDocText(home, id, doc) {
   return fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null;
 }
 
-export function requirementsOf(text) {
+// The PRD's requirements, "### <MODULE>-Rnn: title", as check-doc reads them;
+// a requirement marked "Removed (reason)" is not drawn.
+const reEsc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export function requirementsOf(text, id) {
   const body = splitDoc(text).body;
   const lines = body.split('\n');
   const out = [];
+  const head = new RegExp(`^### (${reEsc(String(id).toUpperCase())}-R\\d{2,}):\\s*(.+)$`);
   for (let i = 0; i < lines.length; i++) {
-    const m = /^### ([A-Z][A-Z0-9-]*-R\d{2,}):\s*(.+)$/.exec(lines[i]);
-    if (!m) continue;
+    const m = head.exec(lines[i]);
+    if (!m || /^Removed\b/i.test(m[2].trim())) continue;
     let j = i + 1;
     while (j < lines.length && !/^#{2,3} /.test(lines[j])) j++;
     out.push({ id: m[1], title: m[2].trim(), text: lines.slice(i, j).join('\n') });
@@ -443,6 +471,7 @@ function sequenceFor(req, pack, sys, cites) {
   }
   if (!routes.length && !calls.length) return null;
   const parts = new Map();
+  const reg = idRegistry();
   const P = (id, as, kind = 'participant') => {
     if (!parts.has(id)) parts.set(id, `  ${kind} ${id} as ${msg(as)}`);
     return id;
@@ -454,17 +483,17 @@ function sequenceFor(req, pack, sys, cites) {
     if (tables.length) step(`  ${who}->>${P('DB', 'Database')}: reads or writes ${msg(tables.join(', '))}`, source);
   };
   for (const r of routes) {
-    const app = P(nid('A', r.app), r.app);
+    const app = P(reg('A', r.app), r.app);
     const pageId = (r.linkedFrom || [])[0];
     if (pageId) {
-      const page = P(nid('S', pageId), pageId);
+      const page = P(reg('S', `${r.app}|${pageId}`), pageId);
       step(`  ${person}->>${page}: uses the page`, null);
       step(`  ${page}->>${app}: ${msg(`${r.method} ${r.uri}`)}`, r.cite);
     } else step(`  ${person}->>${app}: ${msg(`${r.method} ${r.uri}`)}`, r.cite);
     if ((r.middleware || []).length) step(`  Note over ${app}: checks ${msg(r.middleware.join(', '))}`, r.cite);
     for (const x of r.asksBackend) {
       if (x.route && x.route.app && x.route.app !== r.app) {
-        const be = P(nid('A', x.route.app), x.route.app);
+        const be = P(reg('A', x.route.app), x.route.app);
         step(`  ${app}->>${be}: ${msg(`${x.method} ${x.uri || x.reason || ''}`)}`, x.cite);
         tablesStep(be, routeTables(sys, x.route.app, x.route.key), x.cite);
         step(`  ${be}-->>${app}: answer`, null);
@@ -480,10 +509,10 @@ function sequenceFor(req, pack, sys, cites) {
     step(`  ${app}-->>${person}: ${shown.length ? `shows ${msg(shown.map((s) => s.id).join(', '))}` : 'answer'}`, r.handlerCite);
   }
   for (const { screen, call } of calls) {
-    const page = P(nid('S', screen.id), screen.id);
+    const page = P(reg('S', keyOf(screen)), screen.id);
     step(`  ${person}->>${page}: uses the screen`, screen.cite);
     if (call.route && call.route.app) {
-      const be = P(nid('A', call.route.app), call.route.app);
+      const be = P(reg('A', call.route.app), call.route.app);
       step(`  ${page}->>${be}: ${msg(`${call.method} ${call.uri || ''}`)}`, call.cite);
       tablesStep(be, routeTables(sys, call.route.app, call.route.key), call.cite);
       step(`  ${be}-->>${page}: answer`, null);
@@ -516,7 +545,7 @@ function sequencesMd(home, id, m, pack, sys) {
   L.push('Each diagram follows the routes and API calls that the requirement\'s evidence cites. The table under it gives the source of each step.', '');
   let drawn = 0;
   const without = [];
-  for (const r of requirementsOf(prd)) {
+  for (const r of requirementsOf(prd, id)) {
     const cites = resolveTags(tagsIn(r.text), ev, others);
     const s = sequenceFor(r, pack, sys, cites);
     if (!s) {
@@ -536,6 +565,8 @@ const ent = (s) => String(s).replace(/[^A-Za-z0-9_-]/g, '_');
 
 function erMd(m, pack, sys) {
   const L = [`# ${m.name}: data`, '', `> **Status:** Draft, drawn on ${today()}. Technical layer.`, ''];
+  const reg = idRegistry((_, s) => ent(s));
+  const e = (s) => reg('', s);
   if (!pack.tables.length) {
     L.push('This module keeps no tables of its own in this system: its data lives in a service outside the breakdown, or in tables of other modules.', '');
     return { text: L.join('\n'), tables: 0, links: 0 };
@@ -556,12 +587,12 @@ function erMd(m, pack, sys) {
   }
   L.push('Columns come from the migrations and models; their types are not read. Links between tables are **Inferred** from column names ending in `_id`: the code does not declare them, so a developer should confirm each one.', '', '```mermaid', 'erDiagram');
   for (const t of pack.tables) {
-    L.push(`  ${ent(t.name)} {`);
+    L.push(`  ${e(t.name)} {`);
     const fks = new Set(rels.filter((r) => r.from === t.name).map((r) => r.col));
     for (const c of t.columns || []) L.push(`    col ${ent(c)}${c === 'id' ? ' PK' : fks.has(c) ? ' FK' : ''}`);
     L.push('  }');
   }
-  for (const r of rels) L.push(`  ${ent(r.to)} ||--o{ ${ent(r.from)} : "${msg(r.col)}"`);
+  for (const r of rels) L.push(`  ${e(r.to)} ||--o{ ${e(r.from)} : "${msg(r.col)}"`);
   L.push('```', '', '## Tables', '', '| Table | Columns | Models | Source | Class |', '|---|---|---|---|---|');
   for (const t of pack.tables) L.push(`| \`${t.name}\` | ${(t.columns || []).length} | ${(t.models || []).join(', ')} | \`${t.cite}\` | ${t.class || ''} |`);
   L.push('', '## Links between tables (Inferred)', '');

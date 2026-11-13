@@ -29,7 +29,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bodyHash, joinDoc, splitDoc } from '../lib/frontmatter.mjs';
 import { docsDir, fail, parseArgs, readJson, real, today, writeDocs } from '../breakdown/common.mjs';
-import { DOCS_ORDER, NEEDS, checkedRel, decisionsRel, docRel, factsRelOf, isDeep, knownRel, moduleOf, readRound } from './doc.mjs';
+import { DOCS_ORDER, NEEDS, buildFacts, checkedRel, decisionsRel, docRel, factsRelOf, isDeep, knownRel, moduleOf, readRound } from './doc.mjs';
 import { diagRel, diagramState } from '../diagram/diagram.mjs';
 import { checkDoc } from './check-doc.mjs';
 import { plainCheck } from './plain.mjs';
@@ -322,7 +322,7 @@ function flowchartLines(home, id) {
   const D = docsDir(home);
   if (!fs.existsSync(path.join(D, diagRel(id, 'flowchart.md')))) return [...L, `Not drawn yet: \`/tech-plugin:diagram ${id}\`. Once drawn, the owner or PO reads it with the people layer.`, ''];
   const facts = readJson(path.join(D, factsRelOf(id)));
-  const s = diagramState(home, id, facts ? facts.hash : null);
+  const s = diagramState(home, id, facts ? facts.hash : buildFacts(home, id).hash);
   const when = s.drawnAt ? s.drawnAt.slice(0, 10) : '?';
   L.push(`- [ ] **Owner or PO:** does [the flowchart](../diagrams/flowchart.md) show how people move through the screens, with the names they use? Drawn on ${when}${s.state === 'up-to-date' ? '; it matches the code and the documents.' : `; **out of date** (${s.reasons.join('; ')}): redraw it with \`/tech-plugin:diagram ${id}\` first.`}`, '- To change a screen name, edit `diagrams/labels.yaml` (set `from: you`), then redraw.', '');
   return L;

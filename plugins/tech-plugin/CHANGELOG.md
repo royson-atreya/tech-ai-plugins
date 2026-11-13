@@ -2,6 +2,27 @@
 
 All notable changes to tech-plugin. Versions follow semantic versioning; the version is set only in `.claude-plugin/plugin.json`.
 
+## 0.5.1 (2026-11-13)
+
+Fixes from a code review of 0.5.0.
+
+### Fixed
+
+- **`sync` conversion commands quote file paths with single quotes.** A business document named with `$(...)`, backticks or quotes could run a command when you pasted the `uvx markitdown` line into a shell.
+- **Two `docs:` folders with the same name no longer overwrite each other** in `sdlc-docs/sources/`. When names clash, each folder is stored under its path (`docs/business` → `docs-business`). A folder listed twice is read once.
+- **Diagrams go stale when more of what they draw from changes:** the BRD (PRD evidence can point into it), the module list (another module renamed, or screens or routes moved between modules), and the code map (read or linked again). Before, they could stay "Already up to date" while showing old boxes or tables.
+- **Mermaid node ids are unique.** Screens such as `admin.users` and `admin_users` were drawn as one box. The second now gets its own id. The block and ER diagrams use the same rule.
+- **Sequence-diagram participants are keyed by app and screen** (`S_web_patients_index`), so two apps with a screen of the same name stay apart.
+- **Sequence diagrams read only this module's requirements** (`<MODULE>-Rnn`, as `validate` does) and skip any marked `Removed (reason)`.
+- **`diagram labels` sends every unnamed screen to the labeller.** Before, only the first 80 were sent.
+- **The review checklist** gave the business flowchart as out of date when the module's fact pack had not been written yet. It now computes the facts.
+
+### Changed
+
+- **Every module diagram is redrawn once** after this update: the drawing changed (node ids, participants). `diagram` and `sync` give one reason, "tech-plugin draws diagrams differently now".
+- `document status` and `sync` share one rule for whether a document is current (`docFreshness` in `doc.mjs`). The portal reads tables with the diagram scripts' table reader.
+- **Tests:** 12 more in `tests/diagram-tests.mjs` (60 in all).
+
 ## 0.5.0 (2026-11-13)
 
 Build step 6 of 11: `diagram` and `sync`.

@@ -17,9 +17,11 @@ import { SECRET_MARKER } from './golden.mjs';
 import { PLUGIN, runGuard } from './fixture.mjs';
 import { parseYaml, toYaml } from '../scripts/lib/yaml.mjs';
 import { joinDoc, splitDoc } from '../scripts/lib/frontmatter.mjs';
-import { labelProblem, parts } from '../scripts/diagram/diagram.mjs';
+import { labelProblem, parts, requirementsOf } from '../scripts/diagram/diagram.mjs';
 import { parseStep } from '../scripts/diagram/system.mjs';
-import { citesIn } from '../scripts/diagram/mermaid.mjs';
+import { citesIn, idRegistry } from '../scripts/diagram/mermaid.mjs';
+import { buildFacts, docFreshness } from '../scripts/document/doc.mjs';
+import { statePath } from '../scripts/breakdown/state.mjs';
 import { MERMAID_URL, renderMarkdown } from '../scripts/sync/portal.mjs';
 import { codeIn } from '../scripts/document/plain.mjs';
 
@@ -282,7 +284,8 @@ describe('module diagrams', () => {
     assert.match(r01, /sequenceDiagram/);
     assert.match(r01, /participant A_web as web/);
     assert.match(r01, /participant A_backend as backend/);
-    assert.match(r01, /S_patients_index->>A_web: POST patients\/\{id\}\/report/);
+    assert.match(r01, /participant S_web_patients_index as patients\.index/);
+    assert.match(r01, /S_web_patients_index->>A_web: POST patients\/\{id\}\/report/);
     assert.match(r01, /Note over A_web: checks auth/);
     assert.match(r01, /A_web->>A_backend: POST api\/reports/);
     assert.match(r01, /A_backend->>DB: reads or writes pulse_reports/);
@@ -463,7 +466,7 @@ describe('business documents', () => {
     assert.equal(row.why, `2 new, 1 to convert to Markdown, folder not found: ${path.join(G.W, 'gone')}`);
     const r = json(sy(['sources']));
     assert.deepEqual(r.copied.sort(), ['biz/notes/meeting.txt', 'biz/vision.md']);
-    assert.deepEqual(r.toConvert, [{ file: 'biz/contract.pdf', command: `uvx markitdown "${path.join(biz, 'contract.pdf')}" -o "${S('sources/biz/contract.pdf.md')}"` }]);
+    assert.deepEqual(r.toConvert, [{ file: 'biz/contract.pdf', command: `uvx markitdown '${path.join(biz, 'contract.pdf')}' -o '${S('sources/biz/contract.pdf.md')}'` }]);
     assert.equal(read('sources/biz/vision.md'), '# Vision\n');
     assert.ok(!fs.existsSync(S('sources/biz/server.pem')) && !fs.existsSync(S('sources/biz/.hidden.md')));
     assert.ok(!JSON.stringify(r).includes('server.pem'));
@@ -595,6 +598,123 @@ describe('skills, agent and the guard', () => {
     for (const r of [G.backend, G.web, G.mobile]) assert.deepEqual(snapshot(r), before[r]);
     const all = (d) => fs.readdirSync(d, { recursive: true }).filter((f) => fs.statSync(path.join(d, f)).isFile()).map((f) => fs.readFileSync(path.join(d, f), 'utf8')).join('');
     assert.ok(!all(path.join(H, 'sdlc-docs')).includes(SECRET_MARKER));
+  });
+});
+
+// ================================================================ 0.5.1 fixes
+describe('fixes from the 0.5.0 review', () => {
+  // edits a file for one check, then puts it back
+  const withFile = (f, change, fn) => {
+    const keep = fs.readFileSync(f, 'utf8');
+    fs.writeFileSync(f, change(keep));
+    try {
+      return fn();
+    } finally {
+      fs.writeFileSync(f, keep);
+    }
+  };
+  const reasons = () => json(dg(['status', 'patients'])).reasons;
+  test('(the patients diagrams are up to date)', () => assert.equal(json(dg(['status', 'patients'])).next, 'up-to-date'));
+
+  test('Mermaid ids: two names that would read the same get different ids; the same name keeps its id', () => {
+    const id = idRegistry();
+    assert.deepEqual([id('s', 'web|admin.users'), id('s', 'web|admin_users'), id('s', 'web|admin.users'), id('m', 'web|admin.users')], ['s_web_admin_users', 's_web_admin_users_2', 's_web_admin_users', 'm_web_admin_users']);
+    assert.equal(id('s', 'web|admin_users_2'), 's_web_admin_users_2_2');
+  });
+
+  test('PRD requirements: only this module\'s IDs; one marked Removed is not drawn', () => {
+    const prd = '# P\n\n### PATIENTS-R01: Ask\nx\n### PATIENTS-R02: Removed (merged into R01)\n### OTHER-R01: Not ours\n### PATIENTS-R03: Show removed patients\ny\n';
+    assert.deepEqual(requirementsOf(prd, 'patients').map((r) => [r.id, r.title]), [['PATIENTS-R01', 'Ask'], ['PATIENTS-R03', 'Show removed patients']]);
+    assert.deepEqual(requirementsOf('### A.B-R01: Dotted id\n### AXB-R01: Not it\n', 'a.b').map((r) => r.id), ['A.B-R01']);
+  });
+
+  test('the diagrams are stale when the BRD changes (PRD evidence points into it)', () => {
+    withFile(S('modules/patients/brd.md'), (t) => t.replace('Reports for patients.', 'Reports for every patient.'), () => assert.deepEqual(reasons(), ['the BRD changed (PRD evidence may point into it)']));
+    assert.deepEqual(reasons(), []);
+  });
+
+  test('the diagrams are stale when another module is renamed or its screens move', () => {
+    withFile(S('modules.yaml'), (t) => t.replace(/name: Sign-in/, 'name: Signing in'), () => assert.deepEqual(reasons(), ['the module list changed (a module was renamed, or screens or routes moved)']));
+    assert.deepEqual(reasons(), []);
+  });
+
+  test('the diagrams are stale when the code map was linked again', () => {
+    withFile(statePath(H), (t) => {
+      const st = JSON.parse(t);
+      st.stages['4'].at = '2001-01-01T00:00:00.000Z';
+      return JSON.stringify(st, null, 1);
+    }, () => assert.deepEqual(reasons(), ['the code map was read or linked again']));
+    assert.deepEqual(reasons(), []);
+  });
+
+  test('a stamp from an older renderer gives one reason, not one per new input', () => {
+    withFile(S('modules/patients/diagrams/_stamp.json'), (t) => {
+      const st = JSON.parse(t);
+      st.inputs = { facts: st.inputs.facts, spec: st.inputs.spec, prd: st.inputs.prd, labels: st.inputs.labels, renderer: 1 };
+      return JSON.stringify(st);
+    }, () => assert.deepEqual(reasons(), ['tech-plugin draws diagrams differently now']));
+  });
+
+  test('labels: every screen without a name goes to the labeller, past 80', () => {
+    const extra = [...Array(90).keys()].map((i) => ({ app: 'web', id: `extra.page${i}`, file: null, cite: 'web:x:1', labels: [] }));
+    withFile(S('modules/patients/diagrams/labels.yaml'), (t) => t, () =>
+      withFile(S('modules/patients/_facts.json'), (t) => {
+        const p = JSON.parse(t);
+        p.screens.push(...extra);
+        return JSON.stringify(p);
+      }, () => {
+        const r = json(dg(['labels', 'patients']));
+        assert.deepEqual([r.todo, r.screens.length], [90, 90]);
+      }));
+  });
+
+  test('the review checklist reads the diagram state even before the fact pack is written', () => {
+    const f = S('modules/patients/_facts.json');
+    const keep = fs.readFileSync(f, 'utf8');
+    fs.rmSync(f);
+    try {
+      ok(runScript('document', 'signoff.mjs', ['checklist', 'patients', '--home', H]));
+      assert.match(read('modules/patients/checks/review-checklist.md'), /it matches the code and the documents\./);
+    } finally {
+      fs.writeFileSync(f, keep);
+    }
+  });
+
+  test('document status and sync use the same freshness rule', () => {
+    const st = JSON.parse(ok(runScript('document', 'doc.mjs', ['status', 'patients', '--home', H])));
+    const pack = buildFacts(H, 'patients');
+    for (const doc of ['spec', 'brd', 'prd']) assert.equal(docFreshness(H, 'patients', doc, pack).state, st.docs[doc].state, doc);
+    assert.equal(docFreshness(H, 'auth', 'spec', buildFacts(H, 'auth')).state, 'missing');
+  });
+
+  test('business documents: two folders with the same name do not overwrite each other', () => {
+    const one = path.join(G.W, 'team1', 'plans');
+    const two = path.join(G.W, 'team2', 'plans');
+    put(path.join(one, 'plan.md'), '# Plan one\n');
+    put(path.join(two, 'plan.md'), '# Plan two\n');
+    const y = parseYaml(read('system.yaml'));
+    y.docs = [{ path: one }, { path: two }, { path: one }];
+    fs.writeFileSync(S('system.yaml'), toYaml(y));
+    const r = json(sy(['sources']));
+    assert.deepEqual(r.copied.sort(), ['team1-plans/plan.md', 'team2-plans/plan.md']);
+    assert.deepEqual([read('sources/team1-plans/plan.md'), read('sources/team2-plans/plan.md')], ['# Plan one\n', '# Plan two\n']);
+  });
+
+  test('business documents: the conversion command quotes file names, so the shell runs nothing in them', () => {
+    const dir = path.join(G.W, 'odd');
+    const name = "it's $(touch PWNED) `touch PWNED2`.pdf";
+    put(path.join(dir, name), '%PDF-1.4\n');
+    const y = parseYaml(read('system.yaml'));
+    y.docs = [{ path: dir }];
+    fs.writeFileSync(S('system.yaml'), toYaml(y));
+    const r = json(sy(['sources']));
+    assert.equal(r.toConvert.length, 1);
+    const cmd = r.toConvert[0].command;
+    assert.ok(cmd.startsWith('uvx markitdown '), cmd);
+    // the same words, printed instead of converted
+    const p = spawnSync('sh', ['-c', cmd.replace(/^uvx markitdown /, "printf '%s\\n' ")], { cwd: G.W, encoding: 'utf8' });
+    assert.deepEqual(p.stdout.split('\n'), [path.join(dir, name), '-o', S(`sources/odd/${name}.md`), '']);
+    assert.ok(!fs.existsSync(path.join(G.W, 'PWNED')) && !fs.existsSync(path.join(G.W, 'PWNED2')));
   });
 });
 

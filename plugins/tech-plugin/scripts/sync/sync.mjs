@@ -24,7 +24,7 @@ import { PLUGIN_ROOT, docsDir, fail, isSecretFor, parseArgs, readJson, real, wri
 import { loadSystemYaml } from '../breakdown/load.mjs';
 import { loadExisting } from '../breakdown/modules.mjs';
 import { status as breakdownStatus } from '../breakdown/state.mjs';
-import { DOCS_ORDER, NEEDS, buildFacts, docInfo } from '../document/doc.mjs';
+import { DOCS_ORDER, buildFacts, docFreshness, docInfo } from '../document/doc.mjs';
 import { diagRel, diagramState } from '../diagram/diagram.mjs';
 import { systemState } from '../diagram/system.mjs';
 import { buildPortal, portalState } from './portal.mjs';
@@ -65,6 +65,28 @@ const mtime = (p) => {
   }
 };
 
+// A shell word that the shell reads back as exactly s: file names come from
+// people's folders and may hold quotes, "$(...)" or backticks.
+export const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+
+// The folder under sdlc-docs/sources/ for each folder in system.yaml: its own
+// name, or, when two folders share a name, its path joined with "-"
+// (docs/business -> docs-business). A folder listed twice is read once.
+export function sourceNames(home, folders) {
+  const abs = [...new Set(folders.map((f) => path.resolve(home, f)))];
+  const base = (a) => path.basename(a);
+  const used = new Set();
+  return abs.map((a) => {
+    const shared = abs.filter((x) => base(x) === base(a)).length > 1;
+    const long = path.relative(home, a).split(/[\\/]+/).filter((x) => x && x !== '..').join('-');
+    const want = shared && long ? long : base(a);
+    let name = want;
+    for (let n = 2; used.has(name); n++) name = `${want}-${n}`;
+    used.add(name);
+    return { abs: a, name };
+  });
+}
+
 export function scanSources(home) {
   const D = docsDir(home);
   const st = readJson(path.join(D, SOURCES_STATE)) || { files: {} };
@@ -74,13 +96,11 @@ export function scanSources(home) {
   const items = [];
   const missing = [];
   const targets = new Set();
-  for (const folder of folders) {
-    const abs = path.resolve(home, folder);
+  sourceNames(home, folders).forEach(({ abs, name }) => {
     if (!fs.existsSync(abs)) {
-      missing.push(folder);
-      continue;
+      missing.push(folders.find((f) => path.resolve(home, f) === abs));
+      return;
     }
-    const name = path.basename(abs);
     for (const rel of walk(abs, isSecret)) {
       const src = path.join(abs, rel);
       const key = `${name}/${rel}`;
@@ -95,7 +115,7 @@ export function scanSources(home) {
       else state = !prev || prev.hash !== hash ? 'converted' : 'current';
       items.push({ key, src, target, hash, text, state });
     }
-  }
+  });
   // files people put straight into sdlc-docs/sources/
   const own = path.join(D, 'sources');
   if (fs.existsSync(own)) {
@@ -123,7 +143,7 @@ export function syncSources(home) {
     if (x.state === 'current') continue;
     if (x.state === 'to-convert') {
       fs.mkdirSync(path.dirname(path.join(D, x.target)), { recursive: true });
-      toConvert.push({ file: x.key, command: `uvx markitdown "${x.src}" -o "${path.join(D, x.target)}"` });
+      toConvert.push({ file: x.key, command: `uvx markitdown ${shq(x.src)} -o ${shq(path.join(D, x.target))}` });
       continue;
     }
     if (x.text && !x.own) {
@@ -137,19 +157,6 @@ export function syncSources(home) {
 }
 
 // ------------------------------------------------------------------ status
-
-function docState(home, id, doc, pack) {
-  const d = docInfo(home, id, doc);
-  if (!d.exists) return null;
-  if (d.broken) return { state: 'broken', status: null, why: d.broken };
-  if (d.front.facts !== pack.hash) return { state: 'facts-changed', status: d.status, why: 'the code facts changed' };
-  const stale = NEEDS[doc].filter((n) => {
-    const nd = docInfo(home, id, n);
-    return nd.exists && d.front.inputs && d.front.inputs[n] !== nd.hash;
-  });
-  if (stale.length) return { state: 'input-changed', status: d.status, why: `${stale.join(' and ')} changed since it was written` };
-  return { state: 'up-to-date', status: d.status };
-}
 
 export function status(home) {
   const upd = pluginUpdate(PLUGIN_ROOT);
@@ -172,7 +179,8 @@ export function status(home) {
     }
     const pack = buildFacts(home, m.id);
     for (const doc of docs) {
-      const s = docState(home, m.id, doc, pack);
+      const f = docFreshness(home, m.id, doc, pack);
+      const s = { ...f, status: f.state === 'broken' ? null : f.info.status };
       if (s.state === 'up-to-date') {
         current.push(`${m.id} ${doc}`);
         continue;

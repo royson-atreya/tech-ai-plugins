@@ -2,7 +2,7 @@
 
 An SDLC/STLC toolbox for Claude Code that takes any software project from "understand what we have" to "release it safely", with a person approving every important step. Commands are `/tech-plugin:<command>`; each product repo gets its own notebook folder, `<repo>/sdlc-docs/`.
 
-**Status: 0.5.0, build step 6 of 11.** This version contains the safety guard, the session banner, `doctor`, `breakdown`, `document`, `validate`, `diagram` and `sync`. The other commands come in later steps (see `docs/PLAN.md` in the marketplace repo).
+**Status: 0.5.1, build step 6 of 11.** This version contains the safety guard, the session banner, `doctor`, `breakdown`, `document`, `validate`, `diagram` and `sync`. The other commands come in later steps (see `docs/PLAN.md` in the marketplace repo).
 
 ## Install from the local marketplace
 
@@ -195,7 +195,7 @@ Install one with `/plugin install <name>@claude-plugins-official`.
 - **`sequences.md`** is technical: one diagram per PRD requirement whose evidence reaches an API. It goes from the page to the app, the backend and its tables. A requirement whose evidence calls no API is listed.
 - **`er.md`** is technical: the module's tables and columns. Links between tables are **Inferred** from columns ending in `_id`, for a developer to confirm.
 - **`labels.yaml`** holds the screen names, and you can edit it. A name comes from the spec's Screens table when a row points at exactly one screen. The `diagram-labeller` agent writes the rest from the page titles. A script checks each name: at most 8 words, and no code names, paths or symbols. Names you or the labeller wrote are kept on every run. Set `from: you` when you change one.
-- **`_stamp.json`** records what they were drawn from. With no change, the command answers "Already up to date". It redraws when the code facts, the spec, the PRD or a name change.
+- **`_stamp.json`** records what they were drawn from. With no change, the command answers "Already up to date". It redraws when the code facts, the spec, the BRD, the PRD or a name change, when a module is renamed or its screens or routes move, or when the code map is read or linked again.
 
 The flowchart has no sign-off of its own. The owner or PO reads it with the documents: `validate` adds it to `checks/review-checklist.md`.
 
@@ -218,7 +218,7 @@ The flowchart has no sign-off of its own. The owner or PO reads it with the docu
 - **A table of what is out of date.** Each row is a document whose code facts or input document changed, a module's diagrams, the system diagrams, or new business documents. You pick the rows.
 - **Documents are rewritten through the normal document flow.** Rewriting an Approved or Reviewed document makes it a Draft again, and the table warns about that first.
 - **Diagrams are redrawn by script.**
-- **Business documents** come from the folders listed under `docs:` in `system.yaml`. `.md` and `.txt` files are copied to `sdlc-docs/sources/`. For PDF, Word and other files, sync prints a `uvx markitdown "<file>" -o "<target>.md"` command for you to run; it never runs one. Files you put straight into `sources/` are picked up too. Hashes are kept in `_state/sources.json`, so only new and changed files show up.
+- **Business documents** come from the folders listed under `docs:` in `system.yaml`. `.md` and `.txt` files are copied to `sdlc-docs/sources/<folder>/`; two folders with the same name get their path instead (`docs-business`, `client-business`). For PDF, Word and other files, sync prints a `uvx markitdown '<file>' -o '<target>.md'` command for you to run, with the paths quoted so nothing in a file name runs; it never runs one itself. Files you put straight into `sources/` are picked up too. Hashes are kept in `_state/sources.json`, so only new and changed files show up.
 
 **The docs portal** is `sdlc-docs/portal/index.html`, static pages you open from disk:
 - **What it shows:** the system overview and diagrams, the module catalogue, every module's scope card, and its documents and diagrams when they exist, plus the glossary. Never `_state/`, `_map/` or the fact packs.

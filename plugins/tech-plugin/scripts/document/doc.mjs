@@ -286,6 +286,21 @@ export function docInfo(home, id, doc) {
   return { exists: true, front, hash, status: front.status || 'Draft', approvals: { people: valid(ap.people) ? ap.people : null, technical: valid(ap.technical) ? ap.technical : null }, changedSinceApproval: !!((ap.people && ap.people.hash !== hash) || (ap.technical && ap.technical.hash !== hash)) };
 }
 
+// Whether a written document still matches the code facts and the documents
+// it was written from. One place for the rule: document status and sync use it.
+export function docFreshness(home, id, doc, pack) {
+  const d = docInfo(home, id, doc);
+  if (!d.exists) return { state: 'missing', info: d };
+  if (d.broken) return { state: 'broken', why: d.broken, info: d };
+  if (d.front.facts !== pack.hash) return { state: 'facts-changed', why: 'the code facts changed', info: d };
+  const stale = NEEDS[doc].filter((n) => {
+    const nd = docInfo(home, id, n);
+    return nd.exists && d.front.inputs && d.front.inputs[n] !== nd.hash;
+  });
+  if (stale.length) return { state: 'input-changed', why: `${stale.join(' and ')} changed since it was written`, info: d };
+  return { state: 'up-to-date', info: d };
+}
+
 export function status(home, id, { force = false } = {}) {
   const upd = pluginUpdate(PLUGIN_ROOT);
   if (upd) return { module: id, next: 'restart', pluginUpdate: upd, message: upd.message };
@@ -293,17 +308,9 @@ export function status(home, id, { force = false } = {}) {
   const { pack, changed, old } = writeFacts(home, id);
   const docs = {};
   for (const doc of DOCS_ORDER) {
-    const d = docInfo(home, id, doc);
-    let state;
-    if (!d.exists) state = 'missing';
-    else if (d.broken) state = 'broken';
-    else if (force) state = 'forced';
-    else if (d.front.facts !== pack.hash) state = 'facts-changed';
-    else if (NEEDS[doc].some((n) => {
-      const nd = docInfo(home, id, n);
-      return nd.exists && d.front.inputs && d.front.inputs[n] !== nd.hash;
-    })) state = 'input-changed';
-    else state = 'up-to-date';
+    const f = docFreshness(home, id, doc, pack);
+    const d = f.info;
+    const state = force && d.exists && !d.broken ? 'forced' : f.state;
     docs[doc] = { state, status: d.status || null, approvals: d.approvals || null, changedSinceApproval: !!d.changedSinceApproval, broken: d.broken || null };
   }
   const next = DOCS_ORDER.find((d) => docs[d].state !== 'up-to-date') || 'up-to-date';

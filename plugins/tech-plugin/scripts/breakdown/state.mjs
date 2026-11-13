@@ -68,7 +68,7 @@ export function findHome(cwd) {
   return null;
 }
 
-const stampKey = (m) => (m ? `${m.commit || 'none'}:${m.tree}:r${m.readers || 1}` : null);
+export const stampKey = (m) => (m ? `${m.commit || 'none'}:${m.tree}:r${m.readers || 1}` : null);
 const same = (a, b) => JSON.stringify(a || {}) === JSON.stringify(b || {});
 
 // Where the run stands and what to do next. Cheap: reads the progress file,

@@ -8,6 +8,24 @@ import { splitDoc } from '../lib/frontmatter.mjs';
 // A Mermaid node id from any text.
 export const nid = (prefix, s) => `${prefix}_${String(s).replace(/[^A-Za-z0-9_]/g, '_')}`;
 
+// Node ids for one diagram: the same text always gets the same id, and two
+// texts that nid() would merge ("admin.users", "admin_users") get different
+// ones (the later one gets "_2"). Register in a fixed order for stable ids.
+export function idRegistry(make = nid) {
+  const byKey = new Map();
+  const used = new Set();
+  return (prefix, s) => {
+    const k = `${prefix}\u0000${s}`;
+    if (byKey.has(k)) return byKey.get(k);
+    const base = make(prefix, s);
+    let id = base;
+    for (let n = 2; used.has(id); n++) id = `${base}_${n}`;
+    used.add(id);
+    byKey.set(k, id);
+    return id;
+  };
+}
+
 // Text inside ["..."]: no double quotes, no markup.
 export const label = (s) =>
   String(s ?? '')

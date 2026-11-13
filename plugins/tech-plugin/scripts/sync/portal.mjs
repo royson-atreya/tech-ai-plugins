@@ -16,6 +16,7 @@ import { bodyHash, splitDoc } from '../lib/frontmatter.mjs';
 import { docsDir, readJson, today, writeDocs } from '../breakdown/common.mjs';
 import { loadSystemYaml } from '../breakdown/load.mjs';
 import { loadExisting } from '../breakdown/modules.mjs';
+import { cells } from '../diagram/mermaid.mjs';
 
 export const PORTAL_VERSION = 1;
 export const MERMAID_URL = 'https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js';
@@ -57,8 +58,6 @@ function inline(text, link) {
   return t.replace(/\u0000(\d+)\u0000/g, (_, i) => codes[Number(i)]);
 }
 
-const cellsOf = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((c) => c.replace(/\\\|/g, '|').trim());
-
 export function renderMarkdown(md, link = () => null) {
   const lines = String(md).replace(/\r\n?/g, '\n').replace(/<!--[\s\S]*?-->/g, '').split('\n');
   const out = [];
@@ -92,10 +91,10 @@ export function renderMarkdown(md, link = () => null) {
     }
     if (/^\s*\|/.test(l) && i + 1 < lines.length && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1])) {
       flush();
-      const head = cellsOf(l);
+      const head = cells(l);
       i += 2;
       const rows = [];
-      while (i < lines.length && /^\s*\|/.test(lines[i])) rows.push(cellsOf(lines[i++]));
+      while (i < lines.length && /^\s*\|/.test(lines[i])) rows.push(cells(lines[i++]));
       i--;
       out.push(`<div class="table"><table><thead><tr>${head.map((c) => `<th>${inline(c, link)}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${inline(c, link)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
       continue;
