@@ -115,6 +115,21 @@ If the plan changes after you approve it, `implement` stops and gives you the ne
 
 The plan's first step is a test that fails because of the bug, so the fix is proven.
 
+**6. Test it**
+
+```
+/tech-plugin:test-cases W-001                    # test cases, each tied to a requirement
+/tech-plugin:test-run W-001 --env staging        # runs them, drafts defects, writes the report
+/tech-plugin:test-run W-001 --sanity --env staging       # only the few critical cases
+/tech-plugin:test-run W-001 --regression --env staging   # plus the modules' regression suites
+```
+
+- Cases are repo tests, API calls, browser steps (Playwright), or manual steps you answer pass/fail. Test data is always made up.
+- It never runs against an environment marked production in `system.yaml`.
+- A failure becomes a defect (`DEF-W-001-01`) in `tests/defects.md`. Fix it with `/tech-plugin:task DEF-W-001-01`, then run the tests again. Zoho Sprints items are created only after your yes.
+- `tests/test-report.md` and `tests/rtm.md` (requirement → cases → result → defects) are rebuilt on every run. Nobody signs them off.
+- A module gets a regression suite with `/tech-plugin:test-cases patients`. Passing work items add their regression cases to it.
+
 ## All commands
 
 | Command | Example | What you get |
@@ -133,6 +148,8 @@ The plan's first step is a test that fails because of the bug, so the fix is pro
 | `task` | `/tech-plugin:task W-001` or `/tech-plugin:task "bug in words"` | `work/W-001/plan.md` and the 2 commands to approve it |
 | `implement` | `/tech-plugin:implement W-001` | The code, step by step, each step's test run |
 | `review` | `/tech-plugin:review W-001` | Reviews, fixes, `work/W-001/handoff.md` and a ready commit message |
+| `test-cases` | `/tech-plugin:test-cases W-001` or `patients` | `tests/test-cases.md`: cases tied to requirements |
+| `test-run` | `/tech-plugin:test-run W-001 --env staging` | Results, defects, `tests/test-report.md` and `tests/rtm.md` |
 
 All paths are inside `sdlc-docs/`.
 
@@ -184,6 +201,8 @@ Code is edited only when all three are true, in each repo the plan changes:
 | "Already up to date" | Nothing changed. Add `--force` to redo it anyway. |
 | A command is blocked | Read the rule in the message. See "What it will never do". |
 | "needs install: …" during implement | Run that install yourself, then `/tech-plugin:implement W-001` again. |
+| UI test cases "blocked" | Install the Playwright plugin; `/tech-plugin:doctor` shows the test tools. |
+| "the guard allows php artisan only with …" | Run tests with `vendor/bin/phpunit` or `vendor/bin/pest`; the guard limits `php artisan`. |
 | Not sure what to do next | Run `/tech-plugin:next`. |
 | Anything else | Run `/tech-plugin:doctor`. |
 

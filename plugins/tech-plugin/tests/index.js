@@ -9,3 +9,4 @@ import('./diagram-tests.mjs');
 import('./work-tests.mjs');
 import('./next-tests.mjs');
 import('./build-tests.mjs');
+import('./test-tests.mjs');

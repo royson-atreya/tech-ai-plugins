@@ -3,6 +3,7 @@
 `W` = `${CLAUDE_PLUGIN_ROOT}/scripts/work/work.mjs`, `B` = `${CLAUDE_PLUGIN_ROOT}/scripts/work/build.mjs`.
 
 1. **A bug given in words or as a Zoho bug** (not an existing work ID): start a work item as `work-items.md` says, with `--kind bug` added to `work.mjs new`. Use the ID it returns from here on.
+   **A defect ID** (`DEF-W-001-02`): run `node "${CLAUDE_PLUGIN_ROOT}/scripts/test/tests.mjs" defect <DEF> --request --home <home>`; it writes the request file. Then `node W new --request-file <that file> --kind bug --home <home>`, and link them: `tests.mjs defect <DEF> --status in-fix --work <new ID> --home <home>`. Go on with the new ID.
 2. **Status:** `node W status <ID> --home <home>`.
    - `next` is `restart` or `breakdown`: reply with `message` and stop.
    - `next` is `impact`, `requirement`, `approve-requirement`, `design` or `approve-design`: say "Plan after that: <nextText>" and stop.

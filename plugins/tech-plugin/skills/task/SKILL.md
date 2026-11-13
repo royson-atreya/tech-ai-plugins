@@ -1,7 +1,7 @@
 ---
 name: task
-description: Plan the build of a work item, or of a bug given in words or as a Zoho item - the steps, the files each changes, the requirements each covers and the check that proves it - in work/<ID>/plan.md, then print the two commands a person runs to approve it (a feature branch and the APPROVED file). A bug goes straight here: no requirements or design; its first step is a failing test. Run as /tech-plugin:task <ID | "bug in words" | Zoho bug> [--modules a,b] [--force].
-argument-hint: "<work ID | \"bug in words\" | Zoho bug> [--modules a,b] [--force]"
+description: Plan the build of a work item, or of a bug given in words or as a Zoho item - the steps, the files each changes, the requirements each covers and the check that proves it - in work/<ID>/plan.md, then print the two commands a person runs to approve it (a feature branch and the APPROVED file). A bug goes straight here: no requirements or design; its first step is a failing test. A defect ID from a test run becomes a linked bug. Run as /tech-plugin:task <ID | "bug in words" | Zoho bug | DEF-ID> [--modules a,b] [--force].
+argument-hint: "<work ID | \"bug in words\" | Zoho bug | DEF-ID> [--modules a,b] [--force]"
 disable-model-invocation: true
 model: haiku
 effort: low

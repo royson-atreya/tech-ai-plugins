@@ -2,6 +2,34 @@
 
 All notable changes to tech-plugin. Versions follow semantic versioning; the version is set only in `.claude-plugin/plugin.json`.
 
+## 0.8.0 (2026-11-14)
+
+Build step 9 of 11: `test-cases` and `test-run`.
+
+### Added
+
+- **`/tech-plugin:test-cases <ID | module>`**: `test-designer` writes `tests/test-cases.md`, for a work item from its requirements and plan, or a module's regression suite from its PRD.
+  - Each case covers a requirement and has a type (automated, api, ui, manual, perf, mobile), tags (sanity, regression), steps or a command, and what to expect, with made-up test data.
+  - `tests.mjs check`: every requirement has a case, API routes exist, no installs or git in commands, no framework command the guard blocks, no personal data.
+- **`/tech-plugin:test-run <ID | module> [--sanity|--regression] [--env <name>]`**:
+  - runs repo tests (`test-runner`), API calls with curl, browser steps with the Playwright tools (`ui-tester`) and manual cases you answer, against a test environment;
+  - **never production**: environments marked production in `system.yaml` are refused;
+  - skips, with the reason, what cannot run (no environment URL; k6 or Maestro missing);
+  - repo tests of a work item reopen its gate only when `APPROVED` still matches the plan on a feature branch, and close it after. Otherwise you run them, and a JUnit results file is read;
+  - failures become defects (`defect-triager`, `DEF-<X>-NN`) in `tests/defects.md`, sent to Zoho Sprints only after your yes; `/tech-plugin:task DEF-…` makes a linked bug work item;
+  - writes `test-report.md` (Passed, Failed or Incomplete) and `rtm.md` (requirement → cases → result → defects). No QA sign-off;
+  - a defect whose cases pass is marked fixed;
+  - a passing work item's regression cases join its modules' suites when they map to a module requirement.
+- **Work items** continue after the handoff: `test-cases → test-run → fix-defects → tested`. `/tech-plugin:next` follows them, keeps an item in testing ahead of a new breakdown, and finally suggests a regression suite for each documented module.
+- **`/tech-plugin:doctor`** shows the test tools: browser tools for UI tests, k6, Maestro.
+- **Tests:** `tests/test-tests.mjs` (28 tests), and a plan check for blocked framework commands in `build-tests.mjs`; 915 in all.
+
+### Changed
+
+- **Plans and test cases flag framework test commands the guard blocks** (`php artisan test`, `python manage.py test`, `rails test`) and name the runner to use instead (`vendor/bin/phpunit`, `vendor/bin/pest`, `pytest`). The guard's rules are unchanged.
+- **The personal-data check** now catches a phone number at the end of a sentence ("call 9876543210."). Numbers 9000000000–9000000999 are kept for made-up test data.
+- Shared command patterns moved to `scripts/work/patterns.mjs`.
+
 ## 0.7.0 (2026-11-14)
 
 Build step 8 of 11: `task`, `implement`, `review` and the three worker tiers.

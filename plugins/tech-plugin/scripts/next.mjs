@@ -18,6 +18,7 @@
 //   document    the first module, in the suggested order, whose documents
 //               are not all Checked or whose diagrams are not drawn
 //   sync        the docs website is missing or older than the documents
+//   test-cases  a documented module without a regression suite
 //   done        everything is documented, checked and current
 
 import fs from 'node:fs';
@@ -32,6 +33,7 @@ import { DOCS_ORDER, docInfo } from './document/doc.mjs';
 import { diagRel } from './diagram/diagram.mjs';
 import { status as syncStatus } from './sync/sync.mjs';
 import { list as workItems } from './work/work.mjs';
+import { testState } from './test/tests.mjs';
 
 const step = (next, skill, args, why, extra = {}) => ({ next, skill, args, command: skill ? `/tech-plugin:${skill}${args ? ` ${args}` : ''}` : null, why, ...extra });
 
@@ -45,6 +47,9 @@ const WORK = {
   'approve-plan': ['task', 'your approval of its plan (an APPROVED file and a feature branch: /tech-plugin:task prints both commands)'],
   implement: ['implement', 'its code to be built'],
   review: ['review', 'its review and handoff'],
+  'test-cases': ['test-cases', 'its test cases'],
+  'test-run': ['test-run', 'a test run'],
+  'fix-defects': ['task', 'its open defects to be fixed'],
 };
 
 // What a module still needs: null when its documents are all Checked (or
@@ -67,10 +72,16 @@ export function nextStep(cwd) {
   const wasDone = bd.stages && bd.stages['6'] && bd.stages['6'].status === 'done';
   // a build in progress changes the code: finish it before breaking down again
   if (bd.next !== 'up-to-date' && wasDone && loadExisting(home)) {
-    const building = workItems(home).items.find((i) => i.next === 'implement' || i.next === 'review');
-    if (building) {
+    const building = workItems(home).items.find((i) => ['implement', 'review', 'test-cases', 'test-run', 'fix-defects'].includes(i.next));
+    if (building && building.next !== 'fix-defects') {
       const [skill, what] = WORK[building.next];
       return step(building.next, skill, building.id, `Work item ${building.id} "${building.title}" is being built and is waiting for ${what}. Break the code down again after it is merged.`, { home });
+    }
+    if (building) {
+      const open = testState(home, building.id).openDefects;
+      const todo = open.find((d) => d.status === 'open');
+      if (todo) return step('fix-defects', 'task', todo.id, `Work item ${building.id} "${building.title}" has ${open.length} open defect(s); fix ${todo.id} (${todo.severity}) as a bug work item.`, { home });
+      return step('test-run', 'test-run', building.id, `The defects of ${building.id} are being fixed (${open.map((d) => `${d.id} by ${d.work || '?'}`).join(', ')}). Run its tests again once those fixes are built.`, { home });
     }
   }
   if (bd.next !== 'up-to-date') return step('breakdown', 'breakdown', wasDone ? '--refresh' : null, wasDone ? `The code changed since the breakdown: ${bd.message}` : `The breakdown is not finished: ${bd.message}`, { home });
@@ -84,6 +95,12 @@ export function nextStep(cwd) {
   if (open.length) {
     const it = open[0];
     const [skill, what] = WORK[it.next];
+    if (it.next === 'fix-defects') {
+      const open = testState(home, it.id).openDefects;
+      const todo = open.find((d) => d.status === 'open');
+      if (todo) return step('fix-defects', 'task', todo.id, `Work item ${it.id} "${it.title}" has ${open.length} open defect(s); fix ${todo.id} (${todo.severity}) as a bug work item.`, { home });
+      return step('test-run', 'test-run', it.id, `The defects of ${it.id} are being fixed (${open.map((d) => `${d.id} by ${d.work || '?'}`).join(', ')}). Run its tests again once those fixes are built.`, { home });
+    }
     return step(it.next.startsWith('approve') ? 'approve' : skill, skill, it.id, `Work item ${it.id} "${it.title}" is waiting for ${what}.`, { home, progress: open.length > 1 ? `${open.length} work items in progress` : null });
   }
 
@@ -101,6 +118,11 @@ export function nextStep(cwd) {
   if (todo) return step('document', 'document', todo.m.id, `Next module: ${todo.m.name}${todo.m.critical ? ' (critical: money, security or clinical)' : ''}. ${todo.needs}`, { home, progress });
 
   if (sy.portal && sy.portal.state !== 'up-to-date') return step('sync', 'sync', '--portal', 'Build the docs website, so everyone can read the documents in a browser.', { home, progress });
+  // last: a regression suite for each documented module, so later releases can be tested
+  const D = docsDir(home);
+  const withPrd = order.filter((m) => fs.existsSync(path.join(D, 'modules', m.id, 'prd.md')));
+  const noSuite = withPrd.find((m) => !fs.existsSync(path.join(D, 'modules', m.id, 'tests', 'test-cases.md')));
+  if (noSuite) return step('test-cases', 'test-cases', noSuite.id, `Every module is documented. Next: a regression suite for ${noSuite.name}, so every later release can be tested against it.`, { home, progress: `${withPrd.length - withPrd.filter((m) => !fs.existsSync(path.join(D, 'modules', m.id, 'tests', 'test-cases.md'))).length} of ${withPrd.length} documented modules have a regression suite` });
   return step('done', null, null, 'Everything is documented, checked and up to date.', { home, progress, hint: 'For new work: /tech-plugin:impact "what you want to change"' });
 }
 

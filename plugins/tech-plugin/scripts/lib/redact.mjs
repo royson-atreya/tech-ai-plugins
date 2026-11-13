@@ -24,7 +24,8 @@ const EXAMPLE_EMAIL = /@(example\.(com|org|net)|test\.com|domain\.com|email\.com
 
 export const PERSONAL_PATTERNS = [
   ['email address', /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/, (m) => !EXAMPLE_EMAIL.test(m)],
-  ['phone number', /(?<![\d.:/-])(?:\+91[\s-]?)?[6-9]\d{9}(?![\d.:/-])/],
+  // 9000000000-9000000999 is kept for made-up test data (tester-rules.md)
+  ['phone number', /(?<![\d.:/-])(?:\+91[\s-]?)?[6-9]\d{9}(?![\d:/-]|\.\d)/, (m) => !/9000000\d{3}$/.test(m.replace(/\D/g, ''))],
   ['Aadhaar-like number', /(?<![\d.:/-])[2-9]\d{3}[\s-]\d{4}[\s-]\d{4}(?![\d.:/-])/],
   ['PAN-like number', /\b[A-Z]{3}[ABCFGHLJPT][A-Z]\d{4}[A-Z]\b/],
 ];

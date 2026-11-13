@@ -122,7 +122,8 @@ describe('doctor script', () => {
   test('doctor never runs an install (no install verbs executed)', () => {
     const src = fs.readFileSync(DOCTOR, 'utf8');
     const spawned = [...src.matchAll(/version\('([^']+)'/g)].map((m) => m[1]);
-    assert.deepEqual(spawned.sort(), ['claude', 'git', 'graphify', 'uv'].sort());
+    assert.deepEqual(spawned.sort(), ['claude', 'git', 'graphify', 'k6', 'maestro', 'uv'].sort());
+    assert.match(src, /version\('k6', \['version'\]\)/, 'k6 is only asked for its version');
   });
 });
 

@@ -4,7 +4,7 @@ The detailed reference for people who build or troubleshoot the plugin. For ever
 
 An SDLC/STLC toolbox for Claude Code that takes any software project from "understand what we have" to "release it safely", with a person approving every step that leads to code changes. Commands are `/tech-plugin:<command>`; each product repo gets its own notebook folder, `<repo>/sdlc-docs/`.
 
-**Status: 0.7.0, build step 8 of 11.** This version contains the safety guard, the session banner, `next`, `doctor`, `breakdown`, `document`, `validate`, `diagram`, `sync`, `impact`, `requirement`, `design`, `task`, `implement` and `review`. The other commands come in later steps (see `docs/PLAN.md` in the marketplace repo).
+**Status: 0.8.0, build step 9 of 11.** This version contains the safety guard, the session banner, `next`, `doctor`, `breakdown`, `document`, `validate`, `diagram`, `sync`, `impact`, `requirement`, `design`, `task`, `implement`, `review`, `test-cases` and `test-run`. The other commands come in later steps (see `docs/PLAN.md` in the marketplace repo).
 
 ## Install from the local marketplace
 
@@ -50,6 +50,8 @@ Then run `/tech-plugin:doctor`. Don't load the plugin into a session you are usi
 | `/tech-plugin:task <ID \| "bug">` | Plans the build in `work/<ID>/plan.md`: steps, the files each changes, the requirements each covers, the check that proves it. Prints the two commands a person runs to approve it. A bug starts here. |
 | `/tech-plugin:implement <ID>` | Builds an approved plan step by step with worker agents, runs each step's check, and records the results; continues where it stopped. |
 | `/tech-plugin:review <ID>` | Collects what changed, has a code and a security reviewer read it, has a worker fix blocking findings, writes `work/<ID>/handoff.md` and closes the gate. |
+| `/tech-plugin:test-cases <ID \| module>` | Writes test cases tied to requirements (a work item's, or a module's regression suite from its PRD); a script checks every requirement has one. |
+| `/tech-plugin:test-run <ID \| module>` | Runs the cases against a test environment (never production), drafts defects, writes the test report and the traceability matrix. |
 
 All the commands run on Haiku at low effort and are manual-only (`disable-model-invocation`), so they add nothing to the context until you run them. The steps that need judgement go to agents:
 - **Grouping code into modules:** `module-proposer`, Opus at high effort.
@@ -57,6 +59,7 @@ All the commands run on Haiku at low effort and are manual-only (`disable-model-
 - **Checking:** `doc-checker`, with `doc-checker-deep` for those modules; and `readability-reviewer`.
 - **Screen names for diagrams:** `diagram-labeller`, Sonnet at low effort.
 - **Planning new work:** `impact-analyst`, `requirement-analyst` and `design-architect`, Opus at high effort, for the judgement; `story-writer` and `design-writer`, Sonnet at medium effort, for the writing.
+- **Testing:** `test-designer` (Sonnet, medium) writes cases; `test-runner` (Haiku, low) runs repo, API, perf and mobile cases; `ui-tester` (Sonnet, medium) runs browser cases with the Playwright tools; `defect-triager` (Sonnet, medium) turns failures into defects.
 - **Building:** three worker tiers, `worker-light` (Haiku, low), `worker-standard` (Sonnet, medium) and `worker-deep` (Opus, high), chosen by `build.mjs tier`; `code-reviewer` (Sonnet, high) and `security-reviewer` (Opus, high), read-only.
 
 ## breakdown
@@ -317,6 +320,52 @@ The worker changes only the step's files and runs its check through Bash, where 
 
 **While building.** The build changes the code, so "code changed since the breakdown" does not send a started build back to the breakdown or the plan. `status` and `next` keep it on `implement` and `review`. After the merge, `/tech-plugin:next` suggests `breakdown --refresh` and `sync`.
 
+## test-cases and test-run
+
+```
+/tech-plugin:test-cases W-001                      # a work item's cases
+/tech-plugin:test-cases patients                   # a module's regression suite (from its PRD)
+/tech-plugin:test-run W-001 --env staging          # all its cases
+/tech-plugin:test-run W-001 --sanity --env staging # the sanity cases only
+/tech-plugin:test-run W-001 --regression --env staging   # plus its modules' regression suites
+```
+
+**Where:** `work/<ID>/tests/` or `modules/<id>/tests/`, with these files:
+- `test-cases.md`;
+- `runs/run-NNN/` (`run.json`, one output per case);
+- `defects.md`;
+- `test-report.md`;
+- `rtm.md`.
+
+**Cases** (`references/test/test-cases-template.md`, `TC-<ID>-01…`, `TC-PATIENTS-01…`):
+- Each has `**Covers:**`, `**Type:**`, `**Tags:**`, `**Steps:**` and `**Expected:**`. An automated case also has `**Repo:**`, `**Command:**` and `**Test:**`; an API case has `**Request:**`.
+- Types: automated, api, ui, manual, perf (k6), mobile (Maestro).
+- `tests.mjs check` checks:
+  - every requirement has a case (a work item's requirements, `the bug`, or the module's PRD requirements);
+  - API routes exist;
+  - commands neither install packages nor run git;
+  - commands are not framework commands the guard's safe list blocks (`php artisan test`: use `vendor/bin/phpunit` or `vendor/bin/pest`);
+  - no personal data. Mobile numbers 9000000000–9000000999 are kept for made-up test data.
+- Cases are never approved.
+
+**A run** (`references/test/test-run-flow.md`):
+1. **Select.** `select` picks the cases (all, `--sanity`, or `--regression`, which adds the modules' regression suites). It refuses a production environment, records each repo's commit, and skips with a reason:
+   - API and UI cases with no environment URL;
+   - perf and mobile cases when k6 or Maestro is missing.
+2. **Run.**
+   - Repo tests of a work item need the guard's gate. `gate --open` writes `.active` again only when `APPROVED` still matches the plan and the repo is on a feature branch; `gate --close` removes it at the end.
+   - Otherwise (a module, or `main`) the person runs the commands, and `junit` reads a JUnit results file, matched by each case's `**Test:**`.
+   - API cases run with curl, UI cases with the Playwright browser tools; the person answers manual cases.
+   - Runners write `RESULT: …` files; `ingest` saves them with keys hidden.
+3. **Defects.** `defect-triager` groups failures into defects (`references/test/defect-template.md`). `defects` gives the IDs (`DEF-<X>-NN`), only for failed cases, never with personal data.
+   - Zoho Sprints items are created only after the person's yes, then recorded with `defect <DEF> --zoho <n>`.
+   - `defect <DEF> --request` writes the request of a bug work item that fixes it: `/tech-plugin:task DEF-…`.
+4. **Report.** `report` writes `test-report.md` (Passed, Failed or Incomplete; counts; requirements; defects; what did not run) and `rtm.md`.
+   - A defect whose cases all pass is marked fixed.
+   - A passing full run of a work item copies its `regression` cases into its modules' suites. A case moves only when its requirement says which module requirement it changes (`**Changes:** PATIENTS-R02`); others wait until the PRD has the requirement.
+
+**Next steps of a work item** after the handoff: `test-cases → test-run → fix-defects → test-run → tested`. A test report counts only when it covers all the cases on the current `test-cases.md`. No QA sign-off: step 10's release reads the report and the open defects.
+
 ## The safety guard
 
 A fail-closed `PreToolUse` hook (`scripts/guard.mjs`, Node.js, no dependencies) checks **every** tool call before it runs. If the guard crashes, runs out of time (it has its own 2.5 s budget) or cannot understand a call, the call is blocked. It is run as `node guard.mjs || exit 2`, so a missing `node` also blocks. It never answers "allow": a call it passes still goes through Claude Code's normal permission prompts. Every block names its rule, for example:
@@ -399,6 +448,7 @@ node --test tests/
 - `tests/document-tests.mjs` builds the Laravel + Flutter fixtures through `breakdown` (`tests/golden-doc.mjs`). It checks the fact pack, the status and freshness rules, both checks on good and broken sample documents, ID stability, the Checked rules, redaction, the definitions and the guard.
 - `tests/diagram-tests.mjs` runs the same fixtures through `diagram` and `sync`. It checks screen names (from the spec, and the plain-name check), the flowchart, sequence and ER diagrams, the system diagrams, the draw.io copies (well formed, the same boxes and arrows, layout, edited files kept), freshness, the sync table, business documents, and the portal (escaping, folds, links, rebuilds). It also checks the review checklist, the definitions, the guard, and that nothing outside `sdlc-docs/` changes.
 - `tests/build-tests.mjs` takes a bug on the same fixtures (with real commits) from its words to a handoff. It checks prepare, every plan check, the approval gate against the real guard (blocked, wrong plan version, protected branch, open, closed again), tiers and escalation, results and progress, change collection (planned, unplanned, new and secret files), reviews, the handoff, that a build's own code changes do not send it back to the breakdown, and that the plugin never commits or branches.
+- `tests/test-tests.mjs` builds a module suite and takes a bug from its handoff to "tested". It checks the case checks, environment selection (production refused), skips, ingest and JUnit results, the gate for repo tests against the real guard, defects (only for failed cases, no personal data, linked bug items), the report and traceability, defects fixed by a passing run, regression cases moving into a module suite, and the definitions.
 - `tests/work-tests.mjs` runs the same fixtures through `impact`, `requirement` and `design`. It checks work items and IDs, the request's personal-data check, module ranking, the impact pack and report, every check on good and broken sample documents, freshness, decisions, approvals and their roles, the decisions index, the definitions, the guard, and that nothing outside `sdlc-docs/` changes.
 - `tests/map-tests.mjs` adds real code to those fixtures (`tests/golden-map.mjs`) plus a Go service. It checks:
   - every reader against exact routes, screens, calls and tables, and the Laravel parser on edge cases;
@@ -443,10 +493,13 @@ agents/diagram-labeller.md   writes plain screen names into labels.yaml (Sonnet,
 skills/diagram, skills/sync  the diagram and sync commands; flows in references/diagram/ and references/sync/
 skills/impact, requirement, design  planning new work; flows, templates and rules in references/work/
 skills/task, implement, review  building it; flows, the plan template and worker rules in references/work/
+skills/test-cases, test-run  testing it; flows, templates and tester rules in references/test/
+scripts/test/tests.mjs       cases (prepare, check), runs (select, gate, ingest, record, junit), defects, report, RTM, regression suites
 agents/impact-analyst.md, requirement-analyst.md, design-architect.md  judgement (Opus, high effort)
 agents/story-writer.md, design-writer.md  stories and design details (Sonnet, medium effort)
 agents/worker-light|standard|deep.md  the three worker tiers (Haiku low, Sonnet medium, Opus high)
 agents/code-reviewer.md, security-reviewer.md  read-only reviews (Sonnet high, Opus high)
+agents/test-designer.md, test-runner.md, ui-tester.md, defect-triager.md  testing (Sonnet medium, Haiku low, Sonnet medium, Sonnet medium)
 references/document/         writing rules, spec/BRD/PRD templates, jargon list, flows
 config/defaults.json         secret patterns, protected branches, safe-command lists, blocked hosts
 tests/                       guard, doctor and breakdown tests (node --test tests/)

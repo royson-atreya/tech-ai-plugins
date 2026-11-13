@@ -36,6 +36,7 @@ import { loadState, status as breakdownStatus } from '../breakdown/state.mjs';
 import { currentBranch } from '../lib/paths.mjs';
 import { DOCS_ORDER, buildFacts, docRel, writeFacts } from '../document/doc.mjs';
 import { buildState } from './build.mjs';
+import { testState } from '../test/tests.mjs';
 
 export const WORK_DOCS = ['impact', 'requirement', 'design'];
 // the documents each one is written from (besides the request)
@@ -234,13 +235,21 @@ function planningStep(level, s) {
   return 'task';
 }
 
-// b: build.mjs buildState. A bug goes straight to the plan.
-export function nextStep(level, s, b = null, kind = 'feature') {
+// b: build.mjs buildState; t: tests.mjs testState (after the handoff). A bug
+// goes straight to the plan.
+export function nextStep(level, s, b = null, kind = 'feature', t = null) {
   // once the build started, its own code changes do not send it back to planning
   const pre = kind === 'bug' || (b && b.started) ? 'task' : planningStep(level, s);
   if (pre !== 'task' || !b) return pre;
   if (!b.plan.exists || b.plan.state !== 'up-to-date') return 'task';
-  if (b.handedOff) return 'done';
+  if (b.handedOff) {
+    if (!t) return 'done';
+    if (!t.cases.exists) return 'test-cases';
+    if (!t.report || !t.report.current) return t.openDefects.length ? 'fix-defects' : 'test-run';
+    if (t.report.verdict === 'Failed' || t.openDefects.length) return 'fix-defects';
+    if (t.report.verdict === 'Incomplete') return 'test-run';
+    return 'tested';
+  }
   if (!b.approved) return 'approve-plan';
   if (b.done < b.total) return 'implement';
   return 'review';
@@ -257,6 +266,10 @@ const NEXT_TEXT = {
   implement: (id) => `/tech-plugin:implement ${id}`,
   review: (id) => `/tech-plugin:review ${id}`,
   done: (id) => `nothing: ${id} is built and handed off (see work/${id}/handoff.md)`,
+  'test-cases': (id) => `/tech-plugin:test-cases ${id}`,
+  'test-run': (id) => `/tech-plugin:test-run ${id} --env <a test environment>`,
+  'fix-defects': (id) => `fix its open defects (work/${id}/tests/defects.md) with /tech-plugin:task <DEF-ID>, then /tech-plugin:test-run ${id} again`,
+  tested: (id) => `nothing: ${id} is built, handed off and tested (see work/${id}/tests/test-report.md); next comes the release`,
 };
 
 // Recomputes status.json from the documents.
@@ -268,7 +281,8 @@ export function refresh(home, id) {
   const modules = (s.impact.exists && s.impact.modules.length ? s.impact.modules : null) || (s.requirement.exists && s.requirement.modules.length ? s.requirement.modules : null) || item.modules || [];
   const kind = item.kind || 'feature';
   const b = buildState(home, id);
-  const next = nextStep(level, s, b, kind);
+  const tst = b.handedOff ? testState(home, id) : null;
+  const next = nextStep(level, s, b, kind, tst);
   const st = {
     schema: 1,
     id,
@@ -281,11 +295,12 @@ export function refresh(home, id) {
     modules,
     docs: Object.fromEntries(WORK_DOCS.map((d) => [d, s[d].exists ? { status: s[d].status, state: s[d].state, approvedBy: s[d].approved ? `${s[d].approved.by} (${s[d].approved.role})` : null } : null])),
     build: { plan: b.plan.exists ? b.plan.state : null, approved: b.approved, steps: `${b.done}/${b.total}`, handedOff: b.handedOff },
+    tests: tst ? { cases: tst.cases.exists ? tst.cases.count : null, report: tst.report ? tst.report.verdict : null, openDefects: tst.openDefects.length } : null,
     next,
     updatedAt: new Date().toISOString(),
   };
   writeDocs(home, workRel(id, 'status.json'), JSON.stringify(st, null, 1) + '\n');
-  return { ...st, states: s, buildState: b, nextText: NEXT_TEXT[next](id), dir: path.join(docsDir(home), workRel(id)) };
+  return { ...st, states: s, buildState: b, testState: tst, nextText: NEXT_TEXT[next](id), dir: path.join(docsDir(home), workRel(id)) };
 }
 
 export function needsBreakdown(home) {
@@ -308,7 +323,8 @@ export function status(home, id) {
     return `${d}: ${x.status}${x.approved ? ` (approved by ${x.approved.by})` : x.changedSinceApproval ? ' (changed since it was approved)' : ''}${x.state === 'stale' ? `; out of date: ${x.reasons.join('; ')}` : ''}`;
   };
   const b = r.buildState;
-  const parts = [...(r.kind === 'bug' ? [] : WORK_DOCS.map(msg)), ...(b.plan.exists ? [`plan: ${b.plan.state}${b.approved ? ', approved' : ''}, ${b.done}/${b.total} steps done${b.handedOff ? ', handed off' : ''}`] : [])];
+  const ts = r.testState;
+  const parts = [...(r.kind === 'bug' ? [] : WORK_DOCS.map(msg)), ...(b.plan.exists ? [`plan: ${b.plan.state}${b.approved ? ', approved' : ''}, ${b.done}/${b.total} steps done${b.handedOff ? ', handed off' : ''}`] : []), ...(ts && ts.cases.exists ? [`tests: ${ts.cases.count} cases${ts.report ? `, last report ${ts.report.verdict}` : ', not run yet'}${ts.openDefects.length ? `, ${ts.openDefects.length} open defect(s)` : ''}`] : [])];
   return { ...r, message: `${id} "${r.title}"${r.kind === 'bug' ? ' (bug)' : ''}: ${parts.length ? parts.join(' · ') : 'no plan yet'}. Next: ${r.nextText}.` };
 }
 

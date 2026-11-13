@@ -43,12 +43,13 @@ import { docRel } from '../document/doc.mjs';
 import { ROLE_RE, checkCitations, layers } from '../document/check-doc.mjs';
 import { LEVELS, WORK_DOCS, docState, idsOf, prevWorkRel, reEsc, readWorkDoc } from './work.mjs';
 import { parseSteps } from './build.mjs';
+import { GIT_WRITE_RE, INSTALL_RE, TEST_FILE_RE, safeCommandBlocked } from './patterns.mjs';
+import { PLUGIN_ROOT as ROOT } from '../breakdown/common.mjs';
+
+export { GIT_WRITE_RE, INSTALL_RE, TEST_FILE_RE };
 import { isSecretFor } from '../breakdown/common.mjs';
 import { loadState } from '../breakdown/state.mjs';
 
-const INSTALL_RE = /\b(npm|pnpm|yarn|bun)\s+(i|install|add|ci|update|upgrade)\b|\bcomposer\s+(install|require|update)\b|\bpip3?\s+install\b|\b(poetry|pipenv|uv)\s+(add|install|sync)\b|\b(flutter|dart)\s+pub\s+(get|add|upgrade)\b|\bpod\s+install\b|\bgem\s+install\b|\bbundle\s+install\b|\bgo\s+(get|mod\s+download)\b|\bcargo\s+(add|install)\b/i;
-const GIT_WRITE_RE = /\bgit\s+(?!(diff|status|log|show|grep|blame|ls-files|rev-parse)\b)\w+/i;
-const TEST_FILE_RE = /(^|\/)(tests?|spec|specs|__tests__|test_driver|integration_test)\/|[._-](test|spec)\.[a-z]+$|Test\.(php|java|kt)$|_test\.(go|dart|py)$/i;
 
 const CLASSES = ['Verified', 'Inferred', 'Assumption', 'Unknown'];
 const SOURCE_RE = /`[^`]+`|request\.md|glossary\.md|system\.yaml|modules\.yaml|decision D\d+|\b(spec|brd|prd|impact|requirement) E\d+|\bBR-\d+|\b[A-Za-z0-9][\w.-]*-[RSD]\d{2,}\b/;
@@ -301,6 +302,7 @@ export function checkWork(file, home, { part = null } = {}) {
       else if (!s.command && !s.byHand) bad.push(`${s.id}: the check starts with a command in backticks, or with "by hand:"`);
       if (s.command && INSTALL_RE.test(s.command)) bad.push(`${s.id}: the check installs packages; the guard blocks that. Put the install under "Risks and how to undo it" for the person to run`);
       if (s.command && GIT_WRITE_RE.test(s.command)) bad.push(`${s.id}: the check runs git; a person does every git change`);
+      if (s.command && safeCommandBlocked(s.command, ROOT)) bad.push(`${s.id}: ${safeCommandBlocked(s.command, ROOT)}`);
       for (const f of s.files) {
         const abs = repos.get(f.repo);
         if (!abs) {

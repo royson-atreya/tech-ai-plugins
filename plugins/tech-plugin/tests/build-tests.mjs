@@ -56,7 +56,7 @@ function newItem(title, text, kind = null) {
 }
 
 const CTRL = 'web:app/Http/Controllers/PatientPageController.php';
-const bugBody = (id, { risk = 'Low', t01File = '`web:tests/Feature/ExportTest.php` (new)', t01Check = '`php artisan test tests/Feature/ExportTest.php`', steps = 2 } = {}) => `# The export button does nothing: plan
+const bugBody = (id, { risk = 'Low', t01File = '`web:tests/Feature/ExportTest.php` (new)', t01Check = '`vendor/bin/phpunit tests/Feature/ExportTest.php`', steps = 2 } = {}) => `# The export button does nothing: plan
 
 > **In short**
 > - **What changes:** The export button on a patient's page starts the export again.
@@ -116,7 +116,7 @@ ${steps > 1 ? `
 
 **Do:** Add the export action the button calls.
 
-**Check:** \`php artisan test tests/Feature/ExportTest.php\`
+**Check:** \`vendor/bin/phpunit tests/Feature/ExportTest.php\`
 ` : ''}
 ## Document control
 
@@ -178,8 +178,9 @@ describe('the plan checks', () => {
     assert.match(r.out, re);
   };
   test('a bug\'s first step is a failing test', () => fails(bugBody(BUG, { t01File: `\`${CTRL}\` (change)` }), /the first step of a bug adds a test that fails because of the bug/));
-  test('a check that installs packages', () => fails(bugBody(BUG, { t01Check: '`composer install && php artisan test`' }), /the check installs packages; the guard blocks that/));
+  test('a check that installs packages', () => fails(bugBody(BUG, { t01Check: '`composer install && vendor/bin/phpunit`' }), /the check installs packages; the guard blocks that/));
   test('a check that runs git', () => fails(bugBody(BUG, { t01Check: '`git commit -am wip`' }), /the check runs git/));
+  test('a check the guard\'s safe-command list blocks', () => fails(bugBody(BUG, { t01Check: '`php artisan test`' }), /the guard allows "php artisan" only with/));
   test('a file that does not exist and is not marked new', () => fails(bugBody(BUG, { t01File: '`web:tests/Feature/Nope.php` (change)' }), /does not exist; mark it "\(new\)"/));
   test('a secret file', () => fails(bugBody(BUG, { t01File: '`web:.env` (change)' }), /is a secret file: never change it in a plan/));
   test('a repo that is not in the system', () => fails(bugBody(BUG, { t01File: '`shop:tests/a.test.js` (new)' }), /shop is not a repo of this system/));
@@ -343,7 +344,7 @@ describe('review: changes, reviews and the handoff', () => {
     assert.match(t, /Follow the steps that showed the bug\. It should not happen any more:\n\nTo show it:\n\n1\. Open a patient's page\./);
     assert.match(t, /- `web:routes\/web\.php` changed, but no step of the plan names it\./);
     assert.match(t, /- 1 secret file\(s\) changed and were not shown to the reviewers: `web:\.env\.production`/);
-    assert.match(t, /\| W-\d+-T01 A test that shows the bug \| the bug \| `web:tests\/Feature\/ExportTest\.php` \| `php artisan test tests\/Feature\/ExportTest\.php` \| \[pass, attempt 3, standard\]\(checks\/W-\d+-T01-3\.md\) \|/);
+    assert.match(t, /\| W-\d+-T01 A test that shows the bug \| the bug \| `web:tests\/Feature\/ExportTest\.php` \| `vendor\/bin\/phpunit tests\/Feature\/ExportTest\.php` \| \[pass, attempt 3, standard\]\(checks\/W-\d+-T01-3\.md\) \|/);
     assert.match(fs.readFileSync(h.commitMessage, 'utf8'), new RegExp(`^${BUG}: The export button does nothing\\n\\nThe export button on a patient's page starts the export again\\.\\n\\nSteps: ${BUG}-T01, ${BUG}-T02\\n$`));
     assert.match(h.commands[0], /^git -C '.*web' add -A && git -C '.*web' commit -F '.*commit-message\.txt' && git -C '.*web' push -u origin feature\/export$/);
     assert.deepEqual(h.closed, ['web']);
@@ -352,9 +353,9 @@ describe('review: changes, reviews and the handoff', () => {
   test('after the handoff the guard blocks code edits again, and the item is done', () => {
     assert.equal(guardWrite(path.join(G.web, 'app/x.php')), 'block:repo-write');
     const s = json(W(['status', BUG]));
-    assert.equal(s.next, 'done', 'the build\'s own code changes do not send it back to the breakdown');
+    assert.equal(s.next, 'test-cases', 'the build\'s own code changes do not send it back to the breakdown; testing comes next');
     assert.match(s.message, /plan: up-to-date, approved, 2\/2 steps done, handed off/);
-    assert.notEqual(json(runScript('', 'next.mjs', ['--cwd', H])).args, BUG);
+    assert.equal(json(runScript('', 'next.mjs', ['--cwd', H])).command, `/tech-plugin:test-cases ${BUG}`, 'testing comes before a new breakdown');
   });
   test('no commit, no push, no branch made by the plugin: only the person\'s branch', () => {
     assert.equal(gitT(G.web, 'rev-list', '--count', 'HEAD').stdout.trim(), '1');

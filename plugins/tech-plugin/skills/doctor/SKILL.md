@@ -14,10 +14,9 @@ Setup check output:
 
 !`node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" $ARGUMENTS`
 
-Show the output above to the user exactly as it is, with one change: replace
-`ZOHO_STATUS` in the "Zoho Sprints MCP" row with
-- `✅ connected` if any tool available to you has `ZohoSprints` in its name, or
-- `⚠️ not connected (tickets will be plain text in sdlc-docs/work/)` otherwise.
+Show the output above to the user exactly as it is, with two changes:
+- replace `ZOHO_STATUS` in the "Zoho Sprints MCP" row with `✅ connected` if any tool available to you has `ZohoSprints` in its name, or `⚠️ not connected (tickets will be plain text in sdlc-docs/work/)` otherwise;
+- replace `BROWSER_STATUS` in the "Browser tools (UI tests)" row with `✅ available` if any tool available to you has `playwright` and `browser_navigate` in its name, or `⚠️ not available (UI test cases are blocked; install the Playwright plugin or MCP)` otherwise.
 
 If the block above is empty or shows an error instead of a table, run
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" $ARGUMENTS` once with Bash and show its output.

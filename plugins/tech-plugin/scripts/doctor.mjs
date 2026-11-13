@@ -117,6 +117,13 @@ export function report({ dir, env = process.env, home = os.homedir() } = {}) {
 
   add('Zoho Sprints MCP', null, 'ZOHO_STATUS', 'Claude fills this in from the tools it can see');
 
+  // /tech-plugin:test-run: UI cases need browser tools; perf and mobile cases need k6 and Maestro
+  add('Browser tools (UI tests)', null, 'BROWSER_STATUS', 'Claude fills this in: UI test cases need the Playwright plugin or MCP');
+  const k6 = version('k6', ['version']);
+  add('k6 (performance tests)', k6 ? true : null, k6 || 'not found', k6 ? 'perf test cases run' : 'optional: perf test cases are skipped. Install: brew install k6 (https://grafana.com/docs/k6/latest/set-up/install-k6/)');
+  const maestro = version('maestro', ['--version']);
+  add('Maestro (mobile tests)', maestro ? true : null, maestro || 'not found', maestro ? 'mobile test cases run' : 'optional: mobile test cases are skipped. Install: curl -Ls "https://get.maestro.mobile.dev" | bash');
+
   let repo = null;
   for (let d = dir; ; d = path.dirname(d)) {
     if (fs.existsSync(path.join(d, '.git'))) {
