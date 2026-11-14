@@ -1,0 +1,79 @@
+# tech-plugin: checks on every pull request. Written by /tech-plugin:doctor --ci.
+# Copy it to .github/workflows/tech-plugin.yml. It only reads the code and
+# posts one comment on the pull request; it never pushes.
+#
+# Secrets and variables (Settings → Secrets and variables → Actions):
+#   TECH_PLUGIN_TOKEN       only if <owner>/<marketplace-repo> is private: a token that can read it
+#   ANTHROPIC_API_KEY       only for the optional AI security review
+#   TECH_PLUGIN_AI_REVIEW   a repository variable: set it to true to turn the AI review on
+name: tech-plugin check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: tech-plugin-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Get tech-plugin
+        uses: actions/checkout@v4
+        with:
+          repository: <owner>/<marketplace-repo>
+          path: .tech-plugin
+          token: ${{ secrets.TECH_PLUGIN_TOKEN || github.token }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Secret scan (gitleaks; values are redacted)
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.18.4 detect --source=/repo \
+            --log-opts="${{ github.event.pull_request.base.sha }}..HEAD" \
+            --report-format=json --report-path=/repo/.tech-plugin-gitleaks.json --redact --exit-code=0 || true
+      - name: Parts of the product, documents, secret files
+        run: |
+          node .tech-plugin/plugins/tech-plugin/scripts/ci/ci.mjs pr --home . \
+            --base ${{ github.event.pull_request.base.sha }} \
+            --gitleaks .tech-plugin-gitleaks.json --out .tech-plugin-comment.md
+      - name: Post the comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} --body-file .tech-plugin-comment.md --edit-last \
+            || gh pr comment ${{ github.event.pull_request.number }} --body-file .tech-plugin-comment.md
+
+  ai-review:
+    # optional: set the repository variable TECH_PLUGIN_AI_REVIEW to true, and the ANTHROPIC_API_KEY secret
+    if: vars.TECH_PLUGIN_AI_REVIEW == 'true'
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          plugin_marketplaces: |
+            https://github.com/<owner>/<marketplace-repo>.git
+          plugins: |
+            tech-plugin@tech-ai-plugins
+          prompt: "/tech-plugin:ci-check ${{ github.event.pull_request.base.sha }}"
+          claude_args: "--allowedTools Bash(node:*),Read,Grep,Glob,Write,Agent"
+      - name: Post the AI review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test -f sdlc-docs/_state/ci/ai-comment.md && gh pr comment ${{ github.event.pull_request.number }} --body-file sdlc-docs/_state/ci/ai-comment.md || echo "no AI review written"

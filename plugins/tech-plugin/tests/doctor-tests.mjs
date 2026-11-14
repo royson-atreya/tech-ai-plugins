@@ -113,11 +113,13 @@ describe('doctor script', () => {
     const r = doctor(['--dir', folder('bare', {})], { HOME: home });
     assert.match(r.stdout, /LSP plugins \| ⚠️ no manifest found here/);
   });
-  test('--ci -> coming in a later step', () => {
-    const r = doctor(['--ci']);
+  test('--ci outside a git repo: says where to run it, writes nothing', () => {
+    const dir = folder('ci-norepo', {});
+    const r = doctor(['--ci', '--dir', dir]);
     assert.equal(r.status, 0);
-    assert.match(r.stdout, /coming in a later step/);
+    assert.match(r.stdout, /run it inside the git repo whose pull requests should be checked/);
     assert.doesNotMatch(r.stdout, /\| Check \|/);
+    assert.ok(!fs.existsSync(path.join(dir, 'sdlc-docs')));
   });
   test('doctor never runs an install (no install verbs executed)', () => {
     const src = fs.readFileSync(DOCTOR, 'utf8');

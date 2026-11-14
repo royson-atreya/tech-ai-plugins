@@ -10,3 +10,4 @@ import('./work-tests.mjs');
 import('./next-tests.mjs');
 import('./build-tests.mjs');
 import('./test-tests.mjs');
+import('./release-tests.mjs');

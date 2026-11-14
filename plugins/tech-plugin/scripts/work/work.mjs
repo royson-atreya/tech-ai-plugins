@@ -248,7 +248,7 @@ export function nextStep(level, s, b = null, kind = 'feature', t = null) {
     if (!t.report || !t.report.current) return t.openDefects.length ? 'fix-defects' : 'test-run';
     if (t.report.verdict === 'Failed' || t.openDefects.length) return 'fix-defects';
     if (t.report.verdict === 'Incomplete') return 'test-run';
-    return 'tested';
+    return b.released ? 'released' : 'tested';
   }
   if (!b.approved) return 'approve-plan';
   if (b.done < b.total) return 'implement';
@@ -269,7 +269,8 @@ const NEXT_TEXT = {
   'test-cases': (id) => `/tech-plugin:test-cases ${id}`,
   'test-run': (id) => `/tech-plugin:test-run ${id} --env <a test environment>`,
   'fix-defects': (id) => `fix its open defects (work/${id}/tests/defects.md) with /tech-plugin:task <DEF-ID>, then /tech-plugin:test-run ${id} again`,
-  tested: (id) => `nothing: ${id} is built, handed off and tested (see work/${id}/tests/test-report.md); next comes the release`,
+  tested: (id) => `release it: /tech-plugin:release (${id} is built, handed off and tested)`,
+  released: (id) => `nothing: ${id} is released`,
 };
 
 // Recomputes status.json from the documents.
@@ -280,7 +281,7 @@ export function refresh(home, id) {
   const level = item.levelBy ? item.level : fromImpact || item.level || null;
   const modules = (s.impact.exists && s.impact.modules.length ? s.impact.modules : null) || (s.requirement.exists && s.requirement.modules.length ? s.requirement.modules : null) || item.modules || [];
   const kind = item.kind || 'feature';
-  const b = buildState(home, id);
+  const b = { ...buildState(home, id), released: item.released || null };
   const tst = b.handedOff ? testState(home, id) : null;
   const next = nextStep(level, s, b, kind, tst);
   const st = {
@@ -295,6 +296,7 @@ export function refresh(home, id) {
     modules,
     docs: Object.fromEntries(WORK_DOCS.map((d) => [d, s[d].exists ? { status: s[d].status, state: s[d].state, approvedBy: s[d].approved ? `${s[d].approved.by} (${s[d].approved.role})` : null } : null])),
     build: { plan: b.plan.exists ? b.plan.state : null, approved: b.approved, steps: `${b.done}/${b.total}`, handedOff: b.handedOff },
+    released: item.released || null,
     tests: tst ? { cases: tst.cases.exists ? tst.cases.count : null, report: tst.report ? tst.report.verdict : null, openDefects: tst.openDefects.length } : null,
     next,
     updatedAt: new Date().toISOString(),

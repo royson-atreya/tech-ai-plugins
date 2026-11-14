@@ -12,8 +12,10 @@
 //   breakdown   no breakdown yet, one half done, or the code changed since
 //   sync        documents or diagrams no longer match the code, or new
 //               business documents arrived
+//   incident    an open incident comes first
 //   work item   a work item waits for its requirements, design, plan, approval,
 //               build or review
+//   release     tested work items are ready to release
 //   diagram     the system diagrams are not drawn yet
 //   document    the first module, in the suggested order, whose documents
 //               are not all Checked or whose diagrams are not drawn
@@ -34,6 +36,9 @@ import { diagRel } from './diagram/diagram.mjs';
 import { status as syncStatus } from './sync/sync.mjs';
 import { list as workItems } from './work/work.mjs';
 import { testState } from './test/tests.mjs';
+import { listIncidents } from './release/incident.mjs';
+import { releaseStatus } from './release/release.mjs';
+import { refresh } from './work/work.mjs';
 
 const step = (next, skill, args, why, extra = {}) => ({ next, skill, args, command: skill ? `/tech-plugin:${skill}${args ? ` ${args}` : ''}` : null, why, ...extra });
 
@@ -69,6 +74,9 @@ export function nextStep(cwd) {
   const bd = breakdownStatus(cwd);
   if (!bd.found) return step('breakdown', 'breakdown', null, 'First the plugin reads your code and splits it into business modules. It stops twice for you: to confirm the tech stack and to approve the module list.', { home: bd.home || null });
   const home = bd.home;
+  // production is broken: nothing comes before that
+  const inc = listIncidents(home).open;
+  if (inc.length) return step('incident', 'incident', inc[0].incident, `An incident is open: "${inc[0].title}"${inc[0].severity ? ` (${inc[0].severity})` : ''}. Continue it${inc.length > 1 ? ` (${inc.length} open)` : ''}.`, { home });
   const wasDone = bd.stages && bd.stages['6'] && bd.stages['6'].status === 'done';
   // a build in progress changes the code: finish it before breaking down again
   if (bd.next !== 'up-to-date' && wasDone && loadExisting(home)) {
@@ -77,6 +85,9 @@ export function nextStep(cwd) {
       const [skill, what] = WORK[building.next];
       return step(building.next, skill, building.id, `Work item ${building.id} "${building.title}" is being built and is waiting for ${what}. Break the code down again after it is merged.`, { home });
     }
+    // tested work comes out before a new breakdown: the release warns about documents
+    const ready = releaseStatus(home).ready;
+    if (!building && ready.length) return step('release', 'release', null, `${ready.length} work item(s) are tested and ready to release: ${ready.map((i) => i.id).join(', ')}. Break the code down again after the release.`, { home });
     if (building) {
       const open = testState(home, building.id).openDefects;
       const todo = open.find((d) => d.status === 'open');
@@ -104,6 +115,9 @@ export function nextStep(cwd) {
     return step(it.next.startsWith('approve') ? 'approve' : skill, skill, it.id, `Work item ${it.id} "${it.title}" is waiting for ${what}.`, { home, progress: open.length > 1 ? `${open.length} work items in progress` : null });
   }
 
+  const rel = releaseStatus(home).ready;
+  if (rel.length) return step('release', 'release', null, `${rel.length} work item(s) are tested and ready to release: ${rel.map((i) => i.id).join(', ')}.`, { home });
+
   if (!fs.existsSync(path.join(docsDir(home), 'system', 'diagrams', '_stamp.json'))) return step('diagram', 'diagram', 'system', 'Draw the whole system on one page: the apps, their databases and services, and the key journeys. It takes a few seconds and no writing.', { home });
 
   const order = suggestedOrder(my.modules);
@@ -126,11 +140,32 @@ export function nextStep(cwd) {
   return step('done', null, null, 'Everything is documented, checked and up to date.', { home, progress, hint: 'For new work: /tech-plugin:impact "what you want to change"' });
 }
 
+// The next step of one work item (/tech-plugin:status <ID>).
+export function itemStep(cwd, id) {
+  const upd = pluginUpdate(PLUGIN_ROOT);
+  if (upd) return step('restart', null, null, upd.message);
+  const bd = breakdownStatus(cwd);
+  if (!bd.found) return step('breakdown', 'breakdown', null, 'There is no breakdown here yet.');
+  const home = bd.home;
+  const r = refresh(home, id);
+  if (r.next === 'fix-defects') {
+    const open = testState(home, id).openDefects;
+    const todo = open.find((d) => d.status === 'open');
+    if (todo) return step('fix-defects', 'task', todo.id, `${id} has ${open.length} open defect(s); fix ${todo.id} (${todo.severity}) as a bug work item.`, { home });
+    return step('test-run', 'test-run', id, `The defects of ${id} are being fixed; run its tests again once the fixes are built.`, { home });
+  }
+  if (r.next === 'tested') return step('release', 'release', id, `${id} is tested and ready to release.`, { home });
+  if (['released', 'done'].includes(r.next)) return step(r.next, null, null, `${id}: ${r.nextText}.`, { home });
+  const w = WORK[r.next];
+  if (!w) return step(r.next, null, null, `${id}: ${r.nextText}.`, { home });
+  return step(r.next, w[0], id, `${id} "${r.title}" is waiting for ${w[1]}.`, { home });
+}
+
 function main() {
   const a = parseArgs(process.argv.slice(2));
   const cwd = real(a.cwd || process.cwd());
   if (!fs.existsSync(cwd)) fail(`no such folder: ${cwd}`);
-  process.stdout.write(JSON.stringify(nextStep(cwd), null, 2) + '\n');
+  process.stdout.write(JSON.stringify(a.item ? itemStep(cwd, a.item) : nextStep(cwd), null, 2) + '\n');
 }
 
 if (process.argv[1] && real(process.argv[1]) === real(fileURLToPath(import.meta.url))) main();

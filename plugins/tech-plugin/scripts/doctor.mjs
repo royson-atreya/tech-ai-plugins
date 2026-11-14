@@ -153,10 +153,40 @@ export function report({ dir, env = process.env, home = os.homedir() } = {}) {
   return lines.join('\n');
 }
 
-function main() {
+// doctor --ci: the pull-request workflow, written inside sdlc-docs/ for the person to copy.
+async function ci(dir) {
+  let repo = null;
+  for (let d = path.resolve(dir); ; d = path.dirname(d)) {
+    if (fs.existsSync(path.join(d, '.git'))) {
+      repo = d;
+      break;
+    }
+    if (path.dirname(d) === d) break;
+  }
+  if (!repo) return 'doctor --ci: run it inside the git repo whose pull requests should be checked.';
+  const { workflow } = await import('./ci/ci.mjs');
+  const w = workflow(repo);
+  return [
+    `**tech-plugin doctor --ci** (${path.basename(repo)})`,
+    '',
+    `Wrote \`${path.relative(repo, w.file)}\`: on every pull request it posts one comment with the parts of the product the change touches, their risk, the documents that may need a refresh, and a secret scan (gitleaks). It reads only; it never pushes. ${w.known ? `It gets tech-plugin from ${w.marketplace}.` : 'Replace <owner>/<marketplace-repo> in it with the GitHub repo of your tech-plugin marketplace.'}`,
+    '',
+    'Claude writes only inside sdlc-docs/, so put it in place yourself:',
+    '',
+    '```sh',
+    ...w.commands,
+    '```',
+    '',
+    'Then commit it on a branch and open a pull request. Settings → Secrets and variables → Actions:',
+    ...w.secrets.map((s) => `- ${s}`),
+    '- The comment shows the parts of the product only when `sdlc-docs/` (with `modules.yaml` and `_map/`) is committed in this repo.',
+  ].join('\n');
+}
+
+async function main() {
   const a = args();
   if (a.ci) {
-    process.stdout.write('doctor --ci: coming in a later step (it will add a check that runs on every pull request).\n');
+    process.stdout.write((await ci(a.dir)) + '\n');
     return;
   }
   process.stdout.write(report({ dir: a.dir }) + '\n');

@@ -130,6 +130,34 @@ The plan's first step is a test that fails because of the bug, so the fix is pro
 - `tests/test-report.md` and `tests/rtm.md` (requirement → cases → result → defects) are rebuilt on every run. Nobody signs them off.
 - A module gets a regression suite with `/tech-plugin:test-cases patients`. Passing work items add their regression cases to it.
 
+**7. Ship it**
+
+```
+/tech-plugin:release              # every tested item: checklist, release notes, runbook, smoke checks
+/tech-plugin:release 1.4.0        # the same, with your version number
+```
+
+- The checklist shows ✅ / ⚠️ / ❌: every item tested with no blocking defect, its branch merged, and anything that needs care (database migrations, new settings, changed dependencies).
+- `runbook.md` has the deploy **and rollback** steps; `smoke.md` has the checks you do by hand on production after deploying.
+- An Opus reviewer recommends Go, Go with conditions or No go. **You decide, deploy and tag**; the plugin never deploys, tags or pushes. Then run `/tech-plugin:release 1.4.0` again to mark it released.
+
+**When production breaks**
+
+```
+/tech-plugin:incident "Doctors see an error on the patient list"
+```
+
+Paste the errors or log lines it asks for (keys and personal data are masked). It finds the likely cause from the code and recent changes, and says whether to roll back (the last runbook's rollback steps) or hotfix (a bug work item from the release tag). When it is fixed: `/tech-plugin:incident <name> --resolved` writes a blameless postmortem with actions. It never connects to production.
+
+**Where everything stands**
+
+```
+/tech-plugin:status          # every work item and its next step, defects, incidents, releases, modules
+/tech-plugin:status W-001    # continue that item where it stopped
+```
+
+**A check on every pull request:** `/tech-plugin:doctor --ci` writes a GitHub Actions workflow to `sdlc-docs/ci/tech-plugin.yml`; copy it to `.github/workflows/`. Each PR gets one comment: the parts of the product it touches and their risk, the documents to refresh, and a secret scan. An AI security review is optional (an `ANTHROPIC_API_KEY` secret and the variable `TECH_PLUGIN_AI_REVIEW=true`).
+
 ## All commands
 
 | Command | Example | What you get |
@@ -150,6 +178,10 @@ The plan's first step is a test that fails because of the bug, so the fix is pro
 | `review` | `/tech-plugin:review W-001` | Reviews, fixes, `work/W-001/handoff.md` and a ready commit message |
 | `test-cases` | `/tech-plugin:test-cases W-001` or `patients` | `tests/test-cases.md`: cases tied to requirements |
 | `test-run` | `/tech-plugin:test-run W-001 --env staging` | Results, defects, `tests/test-report.md` and `tests/rtm.md` |
+| `release` | `/tech-plugin:release 1.4.0` | `releases/1.4.0/`: checklist, notes, runbook, smoke checks, go/no-go |
+| `incident` | `/tech-plugin:incident "what is broken"` | `incidents/<date>-<name>/`: cause, rollback or hotfix, postmortem |
+| `status` | `/tech-plugin:status` or `/tech-plugin:status W-001` | Where everything stands, or continue one item |
+| `doctor --ci` | `/tech-plugin:doctor --ci` | A pull-request check workflow to copy into `.github/workflows/` |
 
 All paths are inside `sdlc-docs/`.
 

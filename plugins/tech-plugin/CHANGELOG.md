@@ -2,6 +2,36 @@
 
 All notable changes to tech-plugin. Versions follow semantic versioning; the version is set only in `.claude-plugin/plugin.json`.
 
+## 0.9.0 (2026-11-14)
+
+Build step 10 of 11: `release`, `incident`, `status` and `doctor --ci`.
+
+### Added
+
+- **`/tech-plugin:release [version] [IDs]`** writes `releases/<version>/`:
+  - **checklist.md**, worked out by script:
+    - ❌ when an item is not tested on its current cases, has an open blocking defect, has nothing committed, or is not merged (a squash merge counts);
+    - ⚠️ for known issues, migrations, new settings, changed dependencies, and documents that may not match the merged code;
+  - **release notes** and a **runbook** with deploy and rollback steps (`ops-writer`), checked for every item, known issue and flag;
+  - **smoke.md**: checks a person does by hand on production;
+  - **go-no-go.md**, a recommendation from `release-reviewer` (Opus); "Go" is refused while there is a ❌.
+
+  The version is proposed from the last tag. `finish` marks the items released and gives the tag commands. **The plugin never deploys, tags or pushes, and nothing is signed off.**
+- **`/tech-plugin:incident`** writes `incidents/<date>-<name>/`:
+  - the evidence you paste, with keys and personal data masked;
+  - the likely cause from the modules, the commits since the last tag and the last releases (`incident-investigator`, Opus), with a confidence and a way out: rollback (the last runbook) or hotfix (a bug work item from the release tag);
+  - when resolved, a blameless postmortem with actions for roles.
+
+  It never connects to production. `/tech-plugin:next` puts an open incident first.
+- **`/tech-plugin:status [ID]`** shows where every work item (by phase), defect, incident, release and module stands. With an ID, it continues that item (`next.mjs --item`).
+- **`/tech-plugin:doctor --ci`** writes a GitHub Actions workflow to `sdlc-docs/ci/tech-plugin.yml`, for you to copy into `.github/workflows/`. On each PR it posts one comment: the parts of the product touched, their risk, the documents citing the changed files, secret files changed, and a gitleaks scan with values never shown. It runs by script, without Claude. An AI security review (`anthropics/claude-code-action@v1` with tech-plugin, `/tech-plugin:ci-check`) is optional.
+- **Work items** end with `tested → released`. `/tech-plugin:next` offers a release for tested items, ahead of a new breakdown.
+- **Tests:** `tests/release-tests.mjs` (24 tests); 939 in all.
+
+### Changed
+
+- `impact.mjs`: `rankModules` and `moduleFiles` are shared with incidents and CI. The handoff records each repo's branch, for the release's merge check.
+
 ## 0.8.0 (2026-11-14)
 
 Build step 9 of 11: `test-cases` and `test-run`.

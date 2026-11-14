@@ -4,7 +4,7 @@ The detailed reference for people who build or troubleshoot the plugin. For ever
 
 An SDLC/STLC toolbox for Claude Code that takes any software project from "understand what we have" to "release it safely", with a person approving every step that leads to code changes. Commands are `/tech-plugin:<command>`; each product repo gets its own notebook folder, `<repo>/sdlc-docs/`.
 
-**Status: 0.8.0, build step 9 of 11.** This version contains the safety guard, the session banner, `next`, `doctor`, `breakdown`, `document`, `validate`, `diagram`, `sync`, `impact`, `requirement`, `design`, `task`, `implement`, `review`, `test-cases` and `test-run`. The other commands come in later steps (see `docs/PLAN.md` in the marketplace repo).
+**Status: 0.9.0, build step 10 of 11.** This version contains the safety guard, the session banner, `next`, `status`, `doctor` (with `--ci`), `breakdown`, `document`, `validate`, `diagram`, `sync`, `impact`, `requirement`, `design`, `task`, `implement`, `review`, `test-cases`, `test-run`, `release` and `incident`. Step 11 is the pilot. The other commands come in later steps (see `docs/PLAN.md` in the marketplace repo).
 
 ## Install from the local marketplace
 
@@ -52,6 +52,10 @@ Then run `/tech-plugin:doctor`. Don't load the plugin into a session you are usi
 | `/tech-plugin:review <ID>` | Collects what changed, has a code and a security reviewer read it, has a worker fix blocking findings, writes `work/<ID>/handoff.md` and closes the gate. |
 | `/tech-plugin:test-cases <ID \| module>` | Writes test cases tied to requirements (a work item's, or a module's regression suite from its PRD); a script checks every requirement has one. |
 | `/tech-plugin:test-run <ID \| module>` | Runs the cases against a test environment (never production), drafts defects, writes the test report and the traceability matrix. |
+| `/tech-plugin:release [version] [IDs]` | Checklist (tested, merged, flags), release notes, runbook with rollback, smoke checks and a go/no-go recommendation in `releases/<version>/`; the person deploys and tags. |
+| `/tech-plugin:incident ["what is broken" \| name]` | Opens an incident, masks the evidence, finds the likely cause, says rollback or hotfix; `--resolved` writes the postmortem. Never touches production. |
+| `/tech-plugin:status [ID]` | Where every work item, defect, incident, release and module stands; with an ID, continues that item. |
+| `/tech-plugin:doctor --ci` | Writes a pull-request check workflow to `sdlc-docs/ci/` for the person to copy into `.github/workflows/`. |
 
 All the commands run on Haiku at low effort and are manual-only (`disable-model-invocation`), so they add nothing to the context until you run them. The steps that need judgement go to agents:
 - **Grouping code into modules:** `module-proposer`, Opus at high effort.
@@ -59,6 +63,7 @@ All the commands run on Haiku at low effort and are manual-only (`disable-model-
 - **Checking:** `doc-checker`, with `doc-checker-deep` for those modules; and `readability-reviewer`.
 - **Screen names for diagrams:** `diagram-labeller`, Sonnet at low effort.
 - **Planning new work:** `impact-analyst`, `requirement-analyst` and `design-architect`, Opus at high effort, for the judgement; `story-writer` and `design-writer`, Sonnet at medium effort, for the writing.
+- **Shipping and incidents:** `ops-writer` (Sonnet, medium) writes release notes, runbooks and postmortems; `release-reviewer` (Opus, high, read-only) recommends go or no go; `incident-investigator` (Opus, high) finds the likely cause.
 - **Testing:** `test-designer` (Sonnet, medium) writes cases; `test-runner` (Haiku, low) runs repo, API, perf and mobile cases; `ui-tester` (Sonnet, medium) runs browser cases with the Playwright tools; `defect-triager` (Sonnet, medium) turns failures into defects.
 - **Building:** three worker tiers, `worker-light` (Haiku, low), `worker-standard` (Sonnet, medium) and `worker-deep` (Opus, high), chosen by `build.mjs tier`; `code-reviewer` (Sonnet, high) and `security-reviewer` (Opus, high), read-only.
 
@@ -366,6 +371,89 @@ The worker changes only the step's files and runs its check through Bash, where 
 
 **Next steps of a work item** after the handoff: `test-cases → test-run → fix-defects → test-run → tested`. A test report counts only when it covers all the cases on the current `test-cases.md`. No QA sign-off: step 10's release reads the report and the open defects.
 
+## release
+
+```
+/tech-plugin:release                  # every tested item, the next version
+/tech-plugin:release 1.4.0 W-001 W-004 --ref main
+```
+
+`scripts/release/release.mjs`, `references/release/release-flow.md`. Everything goes in `releases/<version>/`.
+
+**The checklist** (`check`, worked out by script):
+- **❌ stops the release** when an item:
+  - is not tested on its current test cases;
+  - has an open blocking defect;
+  - has nothing committed on its branch;
+  - has its branch not merged into the release branch. A squash merge counts when the item's files are the same there.
+- **⚠️ needs care:**
+  - known issues (non-blocking defects);
+  - database migrations (a backup, the migration and its rollback);
+  - new settings (`.env.example`, config);
+  - changed dependencies;
+  - documents that may not match the merged code.
+- **Smoke checks** (`smoke.md`) come from the sanity cases, for a person to do by hand on production.
+- **The version** is proposed from the last tag: patch for bug fixes only, minor otherwise.
+
+**Notes and runbook:**
+- `ops-writer` writes both from `release-notes-template.md` and `runbook-template.md`.
+- `check-docs` checks that every item and known issue is in the notes, and that the runbook has numbered rollback steps and covers every flag: a backup and migration rollback, the install step, the settings.
+
+**Go or no go:**
+- `release-reviewer` writes `go-no-go.md`, a recommendation only.
+- `save-review` refuses anything but "No go" while there is a ❌.
+
+**Finish:** after the person deploys and does the smoke checks, `finish` marks the items released and gives the `git tag` and `push` commands. The plugin never deploys, tags or pushes. Nobody signs anything off.
+
+## incident
+
+```
+/tech-plugin:incident "Doctors see an error on the patient list" --severity S2
+/tech-plugin:incident 2026-11-14-the-patient-list-shows-an-error --resolved
+```
+
+`scripts/release/incident.mjs`, `references/release/incident-flow.md`. Everything goes in `incidents/<date>-<name>/`:
+- `incident.md`: in short, what is broken, who is affected, the timeline, the analysis, the way out;
+- `evidence.md`: what the person pasted, with keys and personal data masked;
+- `postmortem.md`.
+
+**How it goes:**
+1. **Suspects.** `suspects` gives `incident-investigator`:
+   - the modules the words point at;
+   - the commits since the last tag, those touching the modules first;
+   - the last releases and their runbooks.
+2. **The analysis** must have a confidence, a way out (Rollback, Hotfix, Rollback then hotfix, Watch) and evidence.
+3. **A hotfix** is a bug work item (`hotfix` writes its request; `link` records it), branched from the release tag by the person.
+4. **When resolved,** `ops-writer` writes the postmortem. `check-postmortem` checks it has a timeline, actions with roles rather than names, and blameless wording.
+
+`/tech-plugin:next` puts an open incident before everything else. The plugin never connects to production, rolls back or deploys.
+
+## status
+
+`scripts/status.mjs`. One overview:
+- every work item with its phase: planning, waiting for your approval, building, testing, fixing defects, ready to release, released;
+- open defects and incidents;
+- the last releases;
+- modules: documented, checked, with diagrams, with a regression suite.
+
+`/tech-plugin:status <ID>` uses `next.mjs --item <ID>` and continues that item, even in a fresh session.
+
+## doctor --ci and ci-check
+
+`/tech-plugin:doctor --ci` writes `sdlc-docs/ci/tech-plugin.yml` (from `references/release/ci-workflow.yml`), filled in with the marketplace from `~/.claude/plugins/known_marketplaces.json`. The person copies it into `.github/workflows/`.
+
+On each pull request (permissions `contents: read`, `pull-requests: write`; it never pushes):
+- **check** (always; no Claude, no API cost): checks out the repo and tech-plugin, runs gitleaks (`--redact`), then `scripts/ci/ci.mjs pr`, and posts one comment. The comment has:
+  - the parts of the product the changed files belong to, with their risk;
+  - the documents that cite those files;
+  - files in no module;
+  - secret files changed;
+  - the secret-scan findings (rule, file and line; never the value).
+
+  The parts of the product show only when `sdlc-docs/` is committed in the repo.
+- **ai-review** (optional: the variable `TECH_PLUGIN_AI_REVIEW=true` and an `ANTHROPIC_API_KEY` secret): `anthropics/claude-code-action@v1` installs tech-plugin and runs `/tech-plugin:ci-check`. That command has `security-reviewer` read the diff (secret files left out), `ci.mjs ai-comment` writes the comment, and the workflow posts it.
+- A private marketplace needs a `TECH_PLUGIN_TOKEN` secret that can read it.
+
 ## The safety guard
 
 A fail-closed `PreToolUse` hook (`scripts/guard.mjs`, Node.js, no dependencies) checks **every** tool call before it runs. If the guard crashes, runs out of time (it has its own 2.5 s budget) or cannot understand a call, the call is blocked. It is run as `node guard.mjs || exit 2`, so a missing `node` also blocks. It never answers "allow": a call it passes still goes through Claude Code's normal permission prompts. Every block names its rule, for example:
@@ -449,6 +537,13 @@ node --test tests/
 - `tests/diagram-tests.mjs` runs the same fixtures through `diagram` and `sync`. It checks screen names (from the spec, and the plain-name check), the flowchart, sequence and ER diagrams, the system diagrams, the draw.io copies (well formed, the same boxes and arrows, layout, edited files kept), freshness, the sync table, business documents, and the portal (escaping, folds, links, rebuilds). It also checks the review checklist, the definitions, the guard, and that nothing outside `sdlc-docs/` changes.
 - `tests/build-tests.mjs` takes a bug on the same fixtures (with real commits) from its words to a handoff. It checks prepare, every plan check, the approval gate against the real guard (blocked, wrong plan version, protected branch, open, closed again), tiers and escalation, results and progress, change collection (planned, unplanned, new and secret files), reviews, the handoff, that a build's own code changes do not send it back to the breakdown, and that the plugin never commits or branches.
 - `tests/test-tests.mjs` builds a module suite and takes a bug from its handoff to "tested". It checks the case checks, environment selection (production refused), skips, ingest and JUnit results, the gate for repo tests against the real guard, defects (only for failed cases, no personal data, linked bug items), the report and traceability, defects fixed by a passing run, regression cases moving into a module suite, and the definitions.
+- `tests/release-tests.mjs` takes a tested bug to a finished release, with these cases:
+  - not ready while nothing is committed or nothing is merged, or while a blocking defect is open;
+  - the migration and settings flags, and the smoke checks;
+  - the notes and runbook checks, and go/no-go refusing "Go" when not ready;
+  - finishing, with the tag commands only.
+
+  Then it opens and resolves an incident (masking, suspects, the analysis checks, a hotfix work item, the postmortem checks), and checks the status overview, the CI workflow and the PR comment (modules, documents, secrets never shown), the AI comment, and the definitions.
 - `tests/work-tests.mjs` runs the same fixtures through `impact`, `requirement` and `design`. It checks work items and IDs, the request's personal-data check, module ranking, the impact pack and report, every check on good and broken sample documents, freshness, decisions, approvals and their roles, the decisions index, the definitions, the guard, and that nothing outside `sdlc-docs/` changes.
 - `tests/map-tests.mjs` adds real code to those fixtures (`tests/golden-map.mjs`) plus a Go service. It checks:
   - every reader against exact routes, screens, calls and tables, and the Laravel parser on edge cases;
@@ -494,12 +589,17 @@ skills/diagram, skills/sync  the diagram and sync commands; flows in references/
 skills/impact, requirement, design  planning new work; flows, templates and rules in references/work/
 skills/task, implement, review  building it; flows, the plan template and worker rules in references/work/
 skills/test-cases, test-run  testing it; flows, templates and tester rules in references/test/
+skills/release, incident, status, ci-check  shipping, incidents, the overview, the optional AI PR review; flows and templates in references/release/
+scripts/release/             release (checklist, notes and runbook checks, go/no-go, finish), incident (evidence, suspects, analysis, hotfix, postmortem)
+scripts/status.mjs           the overview for /tech-plugin:status
+scripts/ci/ci.mjs            the PR workflow and the PR comment (runs in GitHub Actions without Claude)
 scripts/test/tests.mjs       cases (prepare, check), runs (select, gate, ingest, record, junit), defects, report, RTM, regression suites
 agents/impact-analyst.md, requirement-analyst.md, design-architect.md  judgement (Opus, high effort)
 agents/story-writer.md, design-writer.md  stories and design details (Sonnet, medium effort)
 agents/worker-light|standard|deep.md  the three worker tiers (Haiku low, Sonnet medium, Opus high)
 agents/code-reviewer.md, security-reviewer.md  read-only reviews (Sonnet high, Opus high)
 agents/test-designer.md, test-runner.md, ui-tester.md, defect-triager.md  testing (Sonnet medium, Haiku low, Sonnet medium, Sonnet medium)
+agents/ops-writer.md, release-reviewer.md, incident-investigator.md  release notes, runbooks, postmortems (Sonnet medium); go/no-go and root cause (Opus high)
 references/document/         writing rules, spec/BRD/PRD templates, jargon list, flows
 config/defaults.json         secret patterns, protected branches, safe-command lists, blocked hosts
 tests/                       guard, doctor and breakdown tests (node --test tests/)

@@ -528,7 +528,8 @@ export function handoff(home, id) {
     return `git -C ${sh(r.abs)} add -A && git -C ${sh(r.abs)} commit -F ${sh(path.join(D, msgRel))} && git -C ${sh(r.abs)} push -u origin ${br}`;
   });
   P.push('', '## Commit', '', 'You commit and push; tech-plugin never does. The message is ready:', '', '```text', msg.trimEnd(), '```', '', 'In your own terminal, after looking at `git status` (`add -A` also adds `sdlc-docs/` if you keep it in Git):', '', '```sh', ...commands, '```', '', 'After the merge, run `/tech-plugin:sync`: the documents of the modules it changed will be out of date.', '');
-  const front = { work: id, doc: 'handoff', title: item.title, date: today(), plan: plan.hash, changes: ch.hash };
+  const branches = Object.fromEntries(used.map((name) => [name, currentBranch(repos.get(name).abs)]));
+  const front = { work: id, doc: 'handoff', title: item.title, date: today(), plan: plan.hash, changes: ch.hash, branches };
   writeDocs(home, workRel(id, 'handoff.md'), joinDoc(front, P.join('\n') + '\n'));
   // close the gate: no more code edits for this item
   const closed = [];

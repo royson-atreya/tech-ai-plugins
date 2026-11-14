@@ -41,7 +41,13 @@ const stems = (s) => new Set(words(s).map(stem));
 export function candidates(home, id) {
   const item = loadItem(home, id);
   const req = fs.readFileSync(path.join(item.dir, 'request.md'), 'utf8');
-  const asked = stems(req);
+  return { work: id, title: item.title, ...rankModules(home, req) };
+}
+
+// Every module, ranked by the words of a text it shares (name, purpose,
+// screens, routes, tables); rare words count more. Also used by incidents.
+export function rankModules(home, text) {
+  const asked = stems(text);
   const my = loadExisting(home) || { modules: [] };
   const fieldsOf = (m) => ({
     name: stems(`${m.id} ${m.name}`),
@@ -67,7 +73,7 @@ export function candidates(home, id) {
     return { id: m.id, name: m.name, purpose: m.purpose || null, risk: (m.risk || []).map((r) => r.flag), score: Math.round(score * 10) / 10, matched };
   });
   rows.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
-  return { work: id, title: item.title, likely: rows.filter((r) => r.score > 0 && Object.keys(r.matched).length).slice(0, 8), all: rows.map(({ id: i, name, purpose, risk }) => ({ id: i, name, purpose, risk })) };
+  return { likely: rows.filter((r) => r.score > 0 && Object.keys(r.matched).length).slice(0, 8), all: rows.map(({ id: i, name, purpose, risk }) => ({ id: i, name, purpose, risk })) };
 }
 
 // ------------------------------------------------------------------ pack
@@ -75,7 +81,7 @@ export function candidates(home, id) {
 const repoPath = (a, f) => path.posix.normalize(path.posix.join(a.root || '.', f));
 
 // files of every module (route handlers, screens), per repo
-function moduleFiles(sys, my) {
+export function moduleFiles(sys, my) {
   const out = new Map();
   for (const m of my.modules) {
     const files = new Set();

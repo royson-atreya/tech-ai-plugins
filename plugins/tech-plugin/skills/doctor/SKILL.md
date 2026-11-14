@@ -1,6 +1,6 @@
 ---
 name: doctor
-description: Check the tech-plugin setup (Claude Code, node, git, uv, graphify, LSP plugins, Zoho Sprints, effort settings) and list the commands. Never installs anything.
+description: Check the tech-plugin setup (Claude Code, node, git, uv, graphify, LSP plugins, Zoho Sprints, test tools, effort settings), say how to use the plugin and list the commands. With --ci, write a pull-request check workflow for the person to copy into .github/workflows. Never installs anything.
 argument-hint: "[--ci]"
 disable-model-invocation: true
 model: haiku
